@@ -21,6 +21,13 @@
 // コミットしないよう注意してください。
 const ADMIN_UIDS = [];
 
+// 全角を半角に変換する関数
+function toHalfWidth(str) {
+  return str.replace(/[！-～]/g, function(ch) {
+    return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+  }).replace(/　/g, ' ');
+}
+
 // -----------------------------------------------------------------------------
 // 自作追跡APIのURL
 //
@@ -186,6 +193,8 @@ function init() {
 
   // 入力モード切替ボタン
   document.getElementById('switchInputModeButton').addEventListener('click', () => {
+    // トグル前の状態を保存
+    const wasManual = isManualCaseInputMode;
     // トグル
     isManualCaseInputMode = !isManualCaseInputMode;
     if (isManualCaseInputMode) {
@@ -193,8 +202,18 @@ function init() {
       document.getElementById('scan2dContainer').style.display = 'none';
       document.getElementById('switchInputModeButton').textContent = 'バーコード入力に切り替え';
     } else {
+      // バーコードモードに切り替えた場合はスタート画面に戻す
+      // 現在のフォームをリセットし、バーコード入力画面に遷移
       document.getElementById('scan2dContainer').style.display = '';
       document.getElementById('switchInputModeButton').textContent = '手動入力に切り替え';
+      // スタート画面へ戻る
+      currentCaseData = null;
+      currentShipments = [];
+      document.getElementById('barcodeInput').value = '';
+      setStatus('startStatus', '');
+      showView('addCaseStartView');
+      // フォーカスを設定
+      setTimeout(() => document.getElementById('barcodeInput').focus(), 0);
     }
   });
 
@@ -207,6 +226,20 @@ function init() {
   // メニュー画面のログアウトボタン
   const logoutMenuBtn = document.getElementById('logoutButtonMenu');
   if (logoutMenuBtn) logoutMenuBtn.addEventListener('click', logout);
+
+  // グローバルログアウトボタン（ヘッダー右上）
+  const globalLogoutBtn = document.getElementById('globalLogoutButton');
+  if (globalLogoutBtn) {
+    globalLogoutBtn.addEventListener('click', logout);
+  }
+
+  // 半角変換: class="halfwidth" が付いた入力に対して全角→半角を実施
+  document.addEventListener('input', (e) => {
+    const target = e.target;
+    if (target && target.classList && target.classList.contains('halfwidth')) {
+      target.value = toHalfWidth(target.value);
+    }
+  });
 
   // PC ではカメラ関連のボタンを非表示にする
   if (!IS_MOBILE) {
@@ -243,11 +276,17 @@ function init() {
       // ログイン直後はメニュー画面を表示し、自動ログアウトタイマーをセット
       showView('menuView');
       resetAutoLogoutTimer();
+      // グローバルログアウトボタンを表示
+      const globalLogout = document.getElementById('globalLogoutButton');
+      if (globalLogout) globalLogout.classList.remove('hidden');
     } else {
       // Not logged in
       showView('loginView');
       // ログアウト時にはタイマーを停止
       if (autoLogoutTimer) clearTimeout(autoLogoutTimer);
+      // グローバルログアウトボタンを非表示
+      const globalLogout = document.getElementById('globalLogoutButton');
+      if (globalLogout) globalLogout.classList.add('hidden');
     }
   });
 }
@@ -545,6 +584,8 @@ async function processStartCode(code) {
   let orderNumber = '';
   let customer = '';
   let product = '';
+  // 読み取り結果が完全に揃っているかどうかを判定するフラグ
+  let autoProceed = false;
   if (code) {
     try {
       let payload = code;
@@ -564,8 +605,8 @@ async function processStartCode(code) {
       customer = data.customer || '';
       product = data.product || '';
       setStatus('startStatus', '読み取り成功。次の画面に移動します');
-      // 自動的に次の画面（運送会社・追跡番号入力）へ遷移させるためのフラグ
-      const autoProceed = orderNumber && customer && product;
+      // orderNumber・customer・product がすべて非空なら次の画面へ自動遷移する
+      autoProceed = !!(orderNumber && customer && product);
     } catch (err) {
       // 解凍やパースに失敗した場合は手動入力とみなす
       setStatus('startStatus', '読み取りまたは解凍に失敗しました。手動入力してください');
@@ -656,7 +697,8 @@ function addShipmentsRows(count) {
     const tdTracking = document.createElement('td');
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'trackingInput';
+    // 半角入力用クラスを付与し、追跡番号は半角に変換する
+    input.className = 'trackingInput halfwidth';
     tdTracking.appendChild(input);
     tr.appendChild(tdTracking);
     // camera button for smartphone
@@ -1021,7 +1063,12 @@ async function renderShipmentsInDetails() {
     const div = document.createElement('div');
     div.className = 'form-group';
     const statusObj = await fetchTrackingStatus(ship.carrier, ship.tracking);
-    div.innerHTML = `<strong>${translateCarrier(ship.carrier)}</strong> | ${ship.tracking} | 状態: ${statusObj.status}` + (statusObj.deliveredAt ? ` (${statusObj.deliveredAt})` : '');
+    // 追跡番号を公式サイトへのリンクにする
+    const url = getTrackingUrl(ship.carrier, ship.tracking);
+    const trackingLink = `<a href="${url}" target="_blank" rel="noopener">${ship.tracking}</a>`;
+    // 配達完了日時がある場合は表示
+    const timeStr = statusObj.deliveredAt ? ` (${statusObj.deliveredAt})` : '';
+    div.innerHTML = `<strong>${translateCarrier(ship.carrier)}</strong> | ${trackingLink} | 状態: ${statusObj.status}${timeStr}`;
     container.appendChild(div);
   }
   if (shipments.length === 0) {
@@ -1047,6 +1094,32 @@ function translateCarrier(code) {
     case 'fukuyama': return '福山';
     case 'hida': return '飛騨';
     default: return code;
+  }
+}
+
+/**
+ * 運送会社コードと追跡番号から公式の追跡URLを生成します。
+ * 各社のURL形式に合わせて作成します。
+ * @param {string} code 運送会社スラッグ
+ * @param {string} tracking 追跡番号
+ * @returns {string} 追跡ページのURL
+ */
+function getTrackingUrl(code, tracking) {
+  switch (code) {
+    case 'yamato':
+      return `https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${encodeURIComponent(tracking)}`;
+    case 'sagawa':
+      return `https://k2k.sagawa-exp.co.jp/p/web/okurijosearch.do?okurijoNo=${encodeURIComponent(tracking)}`;
+    case 'seino':
+      return `https://track.seino.co.jp/cgi-bin/gnpquery.pgm?GNPNO1=${encodeURIComponent(tracking)}`;
+    case 'tonami':
+      return `https://trc1.tonami.co.jp/trc/search3/excSearch3?id[0]=${encodeURIComponent(tracking)}`;
+    case 'fukuyama':
+      return `https://corp.fukutsu.co.jp/situation/tracking_no_hunt/${encodeURIComponent(tracking)}`;
+    case 'hida':
+      return `https://www.hidayuso.co.jp/trace?no=${encodeURIComponent(tracking)}`;
+    default:
+      return '#';
   }
 }
 
@@ -1249,7 +1322,7 @@ async function deleteSelectedCases() {
 async function fetchTrackingStatus(carrier, tracking) {
   try {
     if (!window.TRACKING_API_URL) {
-      // ワーカーURLが設定されていない場合はオフラインとして扱う
+      // ワーカーURLが設定されていない場合はステータスを取得できない
       return { status: '情報取得中', deliveredAt: null };
     }
     const url = `${window.TRACKING_API_URL}?carrier=${encodeURIComponent(carrier)}&tracking=${encodeURIComponent(tracking)}`;
@@ -1258,7 +1331,24 @@ async function fetchTrackingStatus(carrier, tracking) {
       return { status: '情報取得中', deliveredAt: null };
     }
     const data = await resp.json();
-    return { status: data.status || '情報取得中', deliveredAt: data.deliveredAt || null };
+    /*
+     * サーバから返されるJSONは環境によりプロパティ名が異なる可能性がある。
+     * Cloudflare Worker版は state/time、従来版は status/deliveredAt を返すため
+     * 両方のキーをチェックして最終的なステータスと日時を決定する。
+     */
+    let status = '情報取得中';
+    if (data.state && typeof data.state === 'string' && data.state.trim()) {
+      status = data.state.trim();
+    } else if (data.status && typeof data.status === 'string' && data.status.trim()) {
+      status = data.status.trim();
+    }
+    let deliveredAt = null;
+    if (data.time) {
+      deliveredAt = data.time;
+    } else if (data.deliveredAt) {
+      deliveredAt = data.deliveredAt;
+    }
+    return { status, deliveredAt };
   } catch (err) {
     return { status: '情報取得中', deliveredAt: null };
   }

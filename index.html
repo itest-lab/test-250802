@@ -19,6 +19,7 @@
 <body>
   <header>
     <h1>案件管理システム</h1>
+    <button id="globalLogoutButton" class="logout-top secondary hidden">ログアウト</button>
   </header>
   <main>
     <!-- Login View -->
@@ -26,11 +27,11 @@
       <h2>ログイン</h2>
       <div class="form-group">
         <label for="emailInput">メールアドレス</label>
-        <input type="email" id="emailInput" autocomplete="username" />
+        <input type="email" id="emailInput" autocomplete="username" class="halfwidth" />
       </div>
       <div class="form-group">
         <label for="passwordInput">パスワード</label>
-        <input type="password" id="passwordInput" autocomplete="current-password" />
+        <input type="password" id="passwordInput" autocomplete="current-password" class="halfwidth" />
       </div>
       <div class="form-actions">
         <button id="loginButton">ログイン</button>
@@ -45,15 +46,15 @@
       <h2>新規登録</h2>
       <div class="form-group">
         <label for="regEmailInput">メールアドレス</label>
-        <input type="email" id="regEmailInput" autocomplete="username" />
+        <input type="email" id="regEmailInput" autocomplete="username" class="halfwidth" />
       </div>
       <div class="form-group">
         <label for="regPasswordInput">パスワード</label>
-        <input type="password" id="regPasswordInput" autocomplete="new-password" />
+        <input type="password" id="regPasswordInput" autocomplete="new-password" class="halfwidth" />
       </div>
       <div class="form-group">
         <label for="regConfirmInput">パスワード（確認）</label>
-        <input type="password" id="regConfirmInput" autocomplete="new-password" />
+        <input type="password" id="regConfirmInput" autocomplete="new-password" class="halfwidth" />
       </div>
       <div class="form-actions">
         <button id="registerSubmitButton">登録</button>
@@ -78,7 +79,8 @@
       <h2>案件追加</h2>
       <div class="form-group">
         <label for="barcodeInput">バーコード入力</label>
-        <input type="text" id="barcodeInput" placeholder="バーコードをスキャンしてください" />
+        <!-- 入力値は半角のみ許可するため halfwidth クラスを付与 -->
+        <input type="text" id="barcodeInput" class="halfwidth" placeholder="バーコードをスキャンしてください" />
         <button id="barcodeCameraButton">カメラ起動</button>
         <button id="manualInputButton" class="secondary">手動入力</button>
         <div id="startQrReader" class="scanner-container hidden"></div>
@@ -105,15 +107,15 @@
       </div>
       <div class="form-group">
         <label for="orderNumberInput">受注番号</label>
-        <input type="text" id="orderNumberInput" />
+        <input type="text" id="orderNumberInput" class="halfwidth" />
       </div>
       <div class="form-group">
         <label for="customerInput">得意先</label>
-        <input type="text" id="customerInput" />
+        <input type="text" id="customerInput" class="halfwidth" />
       </div>
       <div class="form-group">
         <label for="productInput">品名</label>
-        <input type="text" id="productInput" />
+        <input type="text" id="productInput" class="halfwidth" />
       </div>
       <div class="form-actions">
         <button id="caseNextButton">次へ</button>
@@ -160,7 +162,7 @@
     <section id="listView" class="view hidden">
       <h2>案件一覧</h2>
       <div class="form-group">
-        <input type="text" id="searchInput" placeholder="検索（受注番号・得意先・品名）" />
+        <input type="text" id="searchInput" class="halfwidth" placeholder="検索（受注番号・得意先・品名）" />
       </div>
       <div id="casesList"></div>
       <div class="form-actions">
