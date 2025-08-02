@@ -123,7 +123,9 @@ function init() {
   // Buttons in case input view
   document.getElementById('scan2dButton').addEventListener('click', start2DScanner);
   document.getElementById('caseNextButton').addEventListener('click', goToShipments);
-  document.getElementById('logoutButton').addEventListener('click', logout);
+  // caseInputView のログアウトボタンは廃止したが存在チェックして安全に処理
+  const caseLogoutBtn = document.getElementById('logoutButton');
+  if (caseLogoutBtn) caseLogoutBtn.addEventListener('click', logout);
 
   // Buttons in shipments view
   document.getElementById('addMoreShipmentsButton').addEventListener('click', () => addShipmentsRows(5));
@@ -133,8 +135,16 @@ function init() {
 
   // Buttons in list view
   document.getElementById('refreshListButton').addEventListener('click', loadCasesList);
-  document.getElementById('logoutButton2').addEventListener('click', logout);
+  // listView のログアウトボタンは廃止したが存在チェックして安全に処理
+  const listLogoutBtn = document.getElementById('logoutButton2');
+  if (listLogoutBtn) listLogoutBtn.addEventListener('click', logout);
   document.getElementById('searchInput').addEventListener('input', filterCaseList);
+
+  // 日付範囲入力がある場合は変更時にフィルタリングする
+  const startDateInput = document.getElementById('startDateInput');
+  const endDateInput = document.getElementById('endDateInput');
+  if (startDateInput) startDateInput.addEventListener('change', () => renderCaseList(casesCache));
+  if (endDateInput) endDateInput.addEventListener('change', () => renderCaseList(casesCache));
 
   // Buttons in details view
   document.getElementById('addMoreShipmentsDetailsButton').addEventListener('click', () => addShipmentInputsToDetails(5));
@@ -223,7 +233,7 @@ function init() {
   document.getElementById('backToMenuFromListButton').addEventListener('click', () => showView('menuView'));
   document.getElementById('backToMenuFromStartButton').addEventListener('click', () => showView('menuView'));
 
-  // メニュー画面のログアウトボタン
+  // メニュー画面のログアウトボタンは削除したが念のため存在チェック
   const logoutMenuBtn = document.getElementById('logoutButtonMenu');
   if (logoutMenuBtn) logoutMenuBtn.addEventListener('click', logout);
 
@@ -612,37 +622,22 @@ async function processStartCode(code) {
       setStatus('startStatus', '読み取りまたは解凍に失敗しました。手動入力してください');
     }
   }
-  // 次の画面に値を設定
+  // 次の画面の入力欄にも値を設定し、発送情報入力画面へ遷移する
   document.getElementById('orderNumberInput').value = orderNumber;
   document.getElementById('customerInput').value = customer;
   document.getElementById('productInput').value = product;
-  // 状態リセット
   setStatus('caseStatus', '');
-  // 案件入力画面を表示
-  // すべての項目が取得できた場合は自動的に発送情報入力画面へ
-  if (autoProceed) {
-    // currentCaseData を仮登録して shipment に進む
-    currentCaseData = { orderNumber, customer, product };
-    // Reset shipments and show shipments view via goToShipments logic
-    document.getElementById('shipmentsBody').innerHTML = '';
-    addShipmentsRows(10);
-    document.getElementById('carrierAllSelect').value = '';
-    setStatus('shipmentsStatus', '');
-    const summaryDiv = document.getElementById('caseSummary');
-    if (summaryDiv) {
-      summaryDiv.innerHTML = `<strong>受注番号:</strong> ${orderNumber}<br><strong>得意先:</strong> ${customer}<br><strong>品名:</strong> ${product}`;
-    }
-    showView('shipmentsView');
-  } else {
-    // 案件入力画面を表示
-    showView('caseInputView');
-    // フォーカス設定
-    setTimeout(() => {
-      if (!orderNumber) document.getElementById('orderNumberInput').focus();
-      else if (!customer) document.getElementById('customerInput').focus();
-      else if (!product) document.getElementById('productInput').focus();
-    }, 0);
+  // currentCaseData を仮登録して発送情報入力画面へ
+  currentCaseData = { orderNumber, customer, product };
+  document.getElementById('shipmentsBody').innerHTML = '';
+  addShipmentsRows(10);
+  document.getElementById('carrierAllSelect').value = '';
+  setStatus('shipmentsStatus', '');
+  const summaryDiv = document.getElementById('caseSummary');
+  if (summaryDiv) {
+    summaryDiv.innerHTML = `<strong>受注番号:</strong> ${orderNumber}<br><strong>得意先:</strong> ${customer}<br><strong>品名:</strong> ${product}`;
   }
+  showView('shipmentsView');
 }
 
 // -----------------------------------------------------------------------------
@@ -952,11 +947,39 @@ function renderCaseList(list) {
     controlsDiv.appendChild(deleteBtn);
     container.appendChild(controlsDiv);
   }
+  // 日付範囲フィルタを取得
+  let startDate = null;
+  let endDate = null;
+  const startInput = document.getElementById('startDateInput');
+  const endInput = document.getElementById('endDateInput');
+  if (startInput && startInput.value) {
+    // 開始日は00:00:00として比較
+    startDate = new Date(startInput.value);
+    // timezone offset; we want 00:00 at local time; new Date() uses local timezone.
+  }
+  if (endInput && endInput.value) {
+    // 終了日は23:59:59として比較
+    endDate = new Date(endInput.value);
+    // set to end of day
+    endDate.setHours(23, 59, 59, 999);
+  }
+
   list.filter(item => {
-    if (!search) return true;
-    return (item.orderNumber && item.orderNumber.toLowerCase().includes(search)) ||
-           (item.customer && item.customer.toLowerCase().includes(search)) ||
-           (item.product && item.product.toLowerCase().includes(search));
+    // キーワードフィルタ
+    if (search) {
+      const hit = (item.orderNumber && item.orderNumber.toLowerCase().includes(search)) ||
+                  (item.customer && item.customer.toLowerCase().includes(search)) ||
+                  (item.product && item.product.toLowerCase().includes(search));
+      if (!hit) return false;
+    }
+    // 日付範囲フィルタ
+    if (startDate || endDate) {
+      if (!item.createdAt || !item.createdAt.seconds) return false;
+      const itemDate = new Date(item.createdAt.seconds * 1000);
+      if (startDate && itemDate < startDate) return false;
+      if (endDate && itemDate > endDate) return false;
+    }
+    return true;
   }).forEach(item => {
     // 各案件の行
     const row = document.createElement('div');

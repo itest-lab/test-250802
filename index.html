@@ -69,8 +69,6 @@
       <div class="form-actions">
         <button id="menuAddCaseButton">案件追加</button>
         <button id="menuSearchCaseButton">案件検索</button>
-        <!-- メニュー画面にもログアウトボタンを追加 -->
-        <button id="logoutButtonMenu" class="secondary">ログアウト</button>
       </div>
     </section>
 
@@ -119,7 +117,6 @@
       </div>
       <div class="form-actions">
         <button id="caseNextButton">次へ</button>
-        <button id="logoutButton" class="secondary">ログアウト</button>
         <button id="backToMenuFromCaseButton" class="secondary">メニューへ戻る</button>
       </div>
       <p class="status" id="caseStatus"></p>
@@ -164,10 +161,15 @@
       <div class="form-group">
         <input type="text" id="searchInput" class="halfwidth" placeholder="検索（受注番号・得意先・品名）" />
       </div>
+      <div class="form-group date-range">
+        <label for="startDateInput">開始日</label>
+        <input type="date" id="startDateInput" />
+        <label for="endDateInput">終了日</label>
+        <input type="date" id="endDateInput" />
+      </div>
       <div id="casesList"></div>
       <div class="form-actions">
         <button id="refreshListButton" class="secondary">更新</button>
-        <button id="logoutButton2" class="secondary">ログアウト</button>
         <button id="backToMenuFromListButton" class="secondary">メニューへ戻る</button>
       </div>
       <p class="status" id="listStatus"></p>

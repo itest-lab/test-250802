@@ -26,8 +26,9 @@ header {
 /* ヘッダー右上に表示するグローバルログアウトボタン */
 .logout-top {
   position: absolute;
-  top: 0.5rem;
+  /* ヘッダーの右下に配置。タイトルの横に見えるよう、下部に配置する */
   right: 0.5rem;
+  bottom: 0.5rem;
   padding: 0.4rem 0.8rem;
   font-size: 0.9rem;
 }
