@@ -40,7 +40,7 @@ const auth = getAuth(app);
 const db   = getFirestore(app);
 
 // 管理者 UID リスト（Firestoreルールと一致させてください）
-const ADMIN_UIDS = ["管理者1", "管理者2"];
+const ADMIN_UIDS = ["KXwhR1EgWGQS0ObjI4VDouVqkgC2", "V2yHq9bGjIMZFz93f9XnutOBohC2"];
 
 /**
  * ZLIB64形式の文字列をデコード
