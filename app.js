@@ -24,12 +24,14 @@ import {
 
 // Firebase プロジェクト設定（実際の値に置き換えてください）
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyArSM1XI5MLkZDiDdzkLJxBwvjM4xGWS70",
+  authDomain: "test-250724.firebaseapp.com",
+  databaseURL: "https://test-250724-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "test-250724",
+  storageBucket: "test-250724.firebasestorage.app",
+  messagingSenderId: "252374655568",
+  appId: "1:252374655568:web:3e583b46468714b7b7a755",
+  measurementId: "G-5WGPKD9BP2"
 };
 
 // Firebase アプリと各サービスを初期化
@@ -268,7 +270,7 @@ function addMoreShipmentRows(count = 5) {
       <option value="sagawa">佐川</option>
       <option value="seino">西濃</option>
       <option value="tonami">トナミ</option>
-      <option value="fukutsu">福通</option>
+      <option value="fukutsu">福山通運</option>
       <option value="hida">飛騨</option>`;
     tdCo.appendChild(sel);
     tr.appendChild(tdCo);
@@ -535,7 +537,7 @@ function translateCarrier(code) {
     case "sagawa": return "佐川急便";
     case "seino":  return "西濃運輸";
     case "tonami": return "トナミ運輸";
-    case "fukutsu":return "福通";
+    case "fukutsu":return "福山通運";
     case "hida":   return "飛騨運輸";
     default:       return code;
   }
