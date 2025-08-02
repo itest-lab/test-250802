@@ -22,6 +22,15 @@
 const ADMIN_UIDS = [];
 
 // -----------------------------------------------------------------------------
+// 自作追跡APIのURL
+//
+// Cloudflare Workers や Deno Deploy などにデプロイした追跡APIの
+// エンドポイントを指定します。末尾にパス名やクエリを付けず、
+// 例: "https://example.workers.dev/track" のように設定してください。
+// 本プロジェクトでは track-api.hr46-ksg.workers.dev が利用されます。
+window.TRACKING_API_URL = "https://track-api.hr46-ksg.workers.dev/track";
+
+// -----------------------------------------------------------------------------
 // グローバル状態
 // 暗号化／復号に使用する固定の秘密文字列。安全のためご自身でランダムな
 // 文字列に置き換えてください。ユーザーがパスフレーズを入力する必要はなく、
@@ -194,6 +203,10 @@ function init() {
   document.getElementById('backToMenuFromShipmentsButton').addEventListener('click', () => showView('menuView'));
   document.getElementById('backToMenuFromListButton').addEventListener('click', () => showView('menuView'));
   document.getElementById('backToMenuFromStartButton').addEventListener('click', () => showView('menuView'));
+
+  // メニュー画面のログアウトボタン
+  const logoutMenuBtn = document.getElementById('logoutButtonMenu');
+  if (logoutMenuBtn) logoutMenuBtn.addEventListener('click', logout);
 
   // PC ではカメラ関連のボタンを非表示にする
   if (!IS_MOBILE) {
@@ -817,6 +830,8 @@ async function saveCase() {
 
 let unsubscribeCasesListener = null;
 let casesCache = [];
+// 管理者が一覧から複数案件を削除するための選択リスト
+let selectedCaseIds = [];
 
 /**
  * Firestore から作成日時の降順で案件を読み込む。`onSnapshot` により
@@ -856,18 +871,77 @@ async function loadCasesList() {
 function renderCaseList(list) {
   const container = document.getElementById('casesList');
   container.innerHTML = '';
+  selectedCaseIds = [];
   const search = document.getElementById('searchInput').value.trim().toLowerCase();
+  // sort by createdAt desc (newer first)
+  const sorted = [...list].sort((a, b) => {
+    if (a.createdAt && b.createdAt) {
+      return b.createdAt.seconds - a.createdAt.seconds;
+    }
+    return 0;
+  });
+  const isAdmin = currentUser && ADMIN_UIDS.includes(currentUser.uid);
+  // 管理者の場合は全選択・削除ボタンを表示
+  if (isAdmin && sorted.length > 0) {
+    const controlsDiv = document.createElement('div');
+    controlsDiv.className = 'list-controls';
+    const selectAllBox = document.createElement('input');
+    selectAllBox.type = 'checkbox';
+    selectAllBox.id = 'selectAllCases';
+    const selectAllLabel = document.createElement('label');
+    selectAllLabel.htmlFor = 'selectAllCases';
+    selectAllLabel.textContent = '全選択';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = '選択した案件を削除';
+    deleteBtn.addEventListener('click', deleteSelectedCases);
+    selectAllBox.addEventListener('change', (e) => {
+      const checkboxes = container.querySelectorAll('.case-select');
+      checkboxes.forEach(cb => {
+        cb.checked = e.target.checked;
+        if (e.target.checked) {
+          if (!selectedCaseIds.includes(cb.dataset.id)) selectedCaseIds.push(cb.dataset.id);
+        } else {
+          selectedCaseIds = [];
+        }
+      });
+    });
+    controlsDiv.appendChild(selectAllBox);
+    controlsDiv.appendChild(selectAllLabel);
+    controlsDiv.appendChild(deleteBtn);
+    container.appendChild(controlsDiv);
+  }
   list.filter(item => {
     if (!search) return true;
     return (item.orderNumber && item.orderNumber.toLowerCase().includes(search)) ||
            (item.customer && item.customer.toLowerCase().includes(search)) ||
            (item.product && item.product.toLowerCase().includes(search));
   }).forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'case-item';
-    div.textContent = `${item.orderNumber} | ${item.customer} | ${item.product}`;
-    div.addEventListener('click', () => openCaseDetails(item.id));
-    container.appendChild(div);
+    // 各案件の行
+    const row = document.createElement('div');
+    row.className = 'case-item';
+    // チェックボックス
+    if (isAdmin) {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'case-select';
+      cb.dataset.id = item.id;
+      cb.addEventListener('change', (e) => {
+        const id = e.target.dataset.id;
+        if (e.target.checked) {
+          if (!selectedCaseIds.includes(id)) selectedCaseIds.push(id);
+        } else {
+          selectedCaseIds = selectedCaseIds.filter(x => x !== id);
+        }
+      });
+      row.appendChild(cb);
+    }
+    // 情報部分
+    const span = document.createElement('span');
+    span.textContent = `${item.orderNumber} | ${item.customer} | ${item.product}`;
+    span.addEventListener('click', () => openCaseDetails(item.id));
+    span.style.cursor = 'pointer';
+    row.appendChild(span);
+    container.appendChild(row);
   });
   if (list.length === 0) {
     const p = document.createElement('p');
@@ -1113,6 +1187,32 @@ async function deleteCurrentCase() {
   }
 }
 
+/**
+ * 一覧画面で選択された案件を削除する。管理者でない場合は操作を拒否する。
+ */
+async function deleteSelectedCases() {
+  if (!currentUser || !ADMIN_UIDS.includes(currentUser.uid)) {
+    alert('削除権限がありません');
+    return;
+  }
+  if (selectedCaseIds.length === 0) {
+    alert('削除対象が選択されていません');
+    return;
+  }
+  if (!confirm(`${selectedCaseIds.length} 件の案件を削除しますか？`)) return;
+  try {
+    // Firestore の削除を順番に実行
+    for (const id of selectedCaseIds) {
+      await db.collection('cases').doc(id).delete();
+    }
+    selectedCaseIds = [];
+    await loadCasesList();
+    alert('削除しました');
+  } catch (err) {
+    alert('削除に失敗しました: ' + err);
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Tracking status retrieval via public tracking pages
 //
@@ -1136,41 +1236,29 @@ async function deleteCurrentCase() {
  * @param {string} tracking 追跡番号
  * @returns {Promise<{status: string, deliveredAt: string|null}>} 状態と配達日
  */
+/**
+ * 自作の追跡APIを利用して配送ステータスを取得します。Cloudflare Workers など
+ * のサーバレス環境にデプロイしたAPIがJSON形式で状態を返すことを想定
+ * しています。デフォルト値は空文字列なので、利用前に TRACKING_API_URL を
+ * 設定してください。
+ *
+ * @param {string} carrier 運送会社スラッグ（yamato, sagawa など）
+ * @param {string} tracking 追跡番号
+ * @returns {Promise<{status: string, deliveredAt: string|null}>}
+ */
 async function fetchTrackingStatus(carrier, tracking) {
   try {
-    let targetUrl;
-    switch (carrier) {
-      case 'yamato':
-        // Yamato uses a GET endpoint with number01 parameter. number00=1
-        // HTTP 接続の方がリダイレクトや CORS の制約が少ないため http を使用
-        targetUrl = `http://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${tracking}`;
-        break;
-      case 'sagawa':
-        targetUrl = `http://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijoinput.jsp?okurijoNo=${tracking}`;
-        break;
-      case 'seino':
-        targetUrl = `http://track.seino.co.jp/cgi-bin/gnp/GNPBTMN110.asp?wbl_code=11&bn_code=${tracking}`;
-        break;
-      case 'tonami':
-        targetUrl = `http://toi.tonami.co.jp/cgi-bin/trace/TWTRACE?transNo=${tracking}`;
-        break;
-      case 'fukuyama':
-        targetUrl = `http://corp.fukuyama.co.jp/cast/search?id=${tracking}`;
-        break;
-      case 'hida':
-        // 飛騨運輸 – 仮の URL。実際のドメインが http のみの場合も考慮。
-        targetUrl = `http://www.hidayuso.co.jp/trace?no=${tracking}`;
-        break;
-      default:
-        return { status: '情報取得中', deliveredAt: null };
+    if (!window.TRACKING_API_URL) {
+      // ワーカーURLが設定されていない場合はオフラインとして扱う
+      return { status: '情報取得中', deliveredAt: null };
     }
-    const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-    const resp = await fetch(proxied);
+    const url = `${window.TRACKING_API_URL}?carrier=${encodeURIComponent(carrier)}&tracking=${encodeURIComponent(tracking)}`;
+    const resp = await fetch(url);
     if (!resp.ok) {
       return { status: '情報取得中', deliveredAt: null };
     }
-    const html = await resp.text();
-    return parseStatusFromHtml(carrier, html);
+    const data = await resp.json();
+    return { status: data.status || '情報取得中', deliveredAt: data.deliveredAt || null };
   } catch (err) {
     return { status: '情報取得中', deliveredAt: null };
   }
