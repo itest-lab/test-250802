@@ -1,0 +1,857 @@
+/*
+ * app.js
+ *
+ * このファイルは案件管理システムの中核ロジックを定義します。メールアドレスと
+ * パスワードによる認証、新規ユーザー登録、データベースへの案件保存・取得、
+ * 2 次元／1 次元バーコードの読み取り、暗号化処理、画面遷移などを
+ * まとめています。UI は複数のセクション（ビュー）を持ち、状態に応じて
+ * 表示・非表示を切り替えます。
+ *
+ * Firebase の初期化や管理者 UID の設定は firebase-config.js で行います。
+ * データの暗号化には app.js 内で定義された固定の秘密鍵
+ * `APP_ENCRYPTION_SECRET` が用いられ、ユーザーがパスフレーズを入力する
+ * 必要はありません。
+ */
+
+// -----------------------------------------------------------------------------
+// 設定
+//
+// 管理者として扱うユーザーの UID の一覧。ここに登録された UID を持つ
+// ユーザーだけが案件を削除できます。実際の UID を公開リポジトリに
+// コミットしないよう注意してください。
+const ADMIN_UIDS = [];
+
+// -----------------------------------------------------------------------------
+// グローバル状態
+// 暗号化／復号に使用する固定の秘密文字列。安全のためご自身でランダムな
+// 文字列に置き換えてください。ユーザーがパスフレーズを入力する必要はなく、
+// Firestore への保存時に自動的に暗号化されます。
+const APP_ENCRYPTION_SECRET = 'PLEASE_REPLACE_THIS_WITH_A_RANDOM_SECRET';
+let currentUser = null;
+let currentCaseData = null; // holds orderNumber, customer, product before saving
+let currentShipments = [];   // holds shipments before saving
+
+// 2 次元／1 次元バーコード読み取り用のインスタンス。カメラを何度も
+// 初期化し直さないようにインスタンスを使い回します。
+let html5Qr2d = null;
+let html5Qr1d = null;
+
+// -----------------------------------------------------------------------------
+// ユーティリティ関数
+
+/**
+ * 指定されたビュー（section 要素）だけを表示し、それ以外を非表示にする。
+ *
+ * @param {string} viewId 表示するビューの ID
+ */
+function showView(viewId) {
+  const views = document.querySelectorAll('.view');
+  views.forEach(v => {
+    if (v.id === viewId) {
+      v.classList.remove('hidden');
+    } else {
+      v.classList.add('hidden');
+    }
+  });
+}
+
+/**
+ * ステータスメッセージを特定の要素に表示する。
+ *
+ * @param {string} elementId メッセージを表示する要素の ID
+ * @param {string} message 表示するメッセージ
+ */
+function setStatus(elementId, message) {
+  const el = document.getElementById(elementId);
+  if (el) {
+    el.textContent = message;
+  }
+}
+
+/**
+ * 初期化処理。ボタンやフォームにイベントハンドラを登録し、認証状態の
+ * 変化を監視します。ユーザーがログインすると一覧ビューを表示し、
+ * ログアウトするとログインビューに戻ります。
+ */
+function init() {
+  // Buttons in login view
+  document.getElementById('loginButton').addEventListener('click', login);
+  // Navigate to registration view
+  document.getElementById('goToRegisterButton').addEventListener('click', () => {
+    document.getElementById('regEmailInput').value = '';
+    document.getElementById('regPasswordInput').value = '';
+    document.getElementById('regConfirmInput').value = '';
+    setStatus('registerStatus', '');
+    showView('registerView');
+  });
+
+  // Buttons in case input view
+  document.getElementById('scan2dButton').addEventListener('click', start2DScanner);
+  document.getElementById('caseNextButton').addEventListener('click', goToShipments);
+  document.getElementById('logoutButton').addEventListener('click', logout);
+
+  // Buttons in shipments view
+  document.getElementById('addMoreShipmentsButton').addEventListener('click', () => addShipmentsRows(5));
+  document.getElementById('saveCaseButton').addEventListener('click', saveCase);
+  document.getElementById('backToCaseButton').addEventListener('click', () => showView('caseInputView'));
+  document.getElementById('carrierAllSelect').addEventListener('change', applyCarrierToAll);
+
+  // Buttons in list view
+  document.getElementById('refreshListButton').addEventListener('click', loadCasesList);
+  document.getElementById('logoutButton2').addEventListener('click', logout);
+  document.getElementById('searchInput').addEventListener('input', filterCaseList);
+
+  // Buttons in details view
+  document.getElementById('addMoreShipmentsDetailsButton').addEventListener('click', () => addShipmentInputsToDetails(5));
+  document.getElementById('deleteCaseButton').addEventListener('click', deleteCurrentCase);
+  document.getElementById('backToListButton').addEventListener('click', () => showView('listView'));
+
+  // Buttons in register view
+  document.getElementById('registerSubmitButton').addEventListener('click', createAccount);
+  document.getElementById('cancelRegisterButton').addEventListener('click', () => {
+    showView('loginView');
+  });
+
+  // Auth state observer
+  auth.onAuthStateChanged(async user => {
+    currentUser = user;
+    if (user) {
+      // Show list view by default after login
+      showView('listView');
+      await loadCasesList();
+    } else {
+      // Not logged in
+      showView('loginView');
+    }
+  });
+}
+
+// -----------------------------------------------------------------------------
+// 認証関連の関数群
+
+/**
+ * メールアドレスとパスワードでログインする。暗号化に必要な秘密鍵は
+ * コード内に固定されているため、ユーザーがパスフレーズを入力する必要はありません。
+ */
+async function login() {
+  const email = document.getElementById('emailInput').value.trim();
+  const pwd = document.getElementById('passwordInput').value;
+  if (!email || !pwd) {
+    setStatus('authStatus', 'メールとパスワードを入力してください');
+    return;
+  }
+  setStatus('authStatus', 'ログイン中...');
+  try {
+    await auth.signInWithEmailAndPassword(email, pwd);
+    setStatus('authStatus', '');
+    // Auth observer will handle view change
+  } catch (err) {
+    setStatus('authStatus', 'ログイン失敗: ' + err.message);
+  }
+}
+
+/**
+ * 新規登録画面でアカウントを作成する。メールアドレス・パスワード・確認用
+ * パスワードを受け取り、入力値がすべて揃っているか、パスワードと確認用
+ * パスワードが一致しているかを検証する。一致しない場合はエラーメッセージを
+ * 表示し、登録処理を行わない。成功すると自動的にログインした状態となり、
+ * 一覧画面へ遷移します。
+ */
+async function createAccount() {
+  const email = document.getElementById('regEmailInput').value.trim();
+  const pwd = document.getElementById('regPasswordInput').value;
+  const confirm = document.getElementById('regConfirmInput').value;
+  if (!email || !pwd || !confirm) {
+    setStatus('registerStatus', 'すべての項目を入力してください');
+    return;
+  }
+  if (pwd !== confirm) {
+    setStatus('registerStatus', 'パスワードと確認用パスワードが一致しません');
+    return;
+  }
+  setStatus('registerStatus', '登録中...');
+  try {
+    await auth.createUserWithEmailAndPassword(email, pwd);
+    setStatus('registerStatus', '登録成功。ログインしました。');
+    // Navigate to list view handled by auth observer
+  } catch (err) {
+    setStatus('registerStatus', '登録失敗: ' + err.message);
+  }
+}
+
+// Remove old register function. Registration is handled by createAccount()
+
+// ゲストログイン機能は固定鍵による暗号化に移行したため利用できません。
+// 登録済みユーザーのみログイン可能です。
+
+/**
+ * 現在のユーザーをログアウトさせる。ユーザー関連の一時情報をリセットし、
+ * ログイン画面に戻る。
+ */
+async function logout() {
+  await auth.signOut();
+  currentCaseData = null;
+  currentShipments = [];
+  showView('loginView');
+}
+
+// -----------------------------------------------------------------------------
+// 2D barcode scanning for case information
+
+/**
+ * ZLIB64 形式でエンコードされた 2 次元バーコードを読み取る。
+ *
+ * html5‑qrcode ライブラリを用いてカメラを起動し、読み取りに成功すると
+ * コールバック関数が呼ばれる。読み取った文字列から "ZLIB64:" という
+ * プレフィックスを除去し、`atob` で Base64 文字列をバイト列に変換して
+ * から pako.inflate で zlib 展開を行う【264503526820217†L346-L376】【923982417776980†L126-L137】。
+ * 展開結果は JSON 文字列であることを想定し、注文番号（orderNumber）、
+ * 得意先（customer）、品名（product）などのフィールドを取得して
+ * 入力欄に自動で反映する。成功したらカメラを停止して読み取りエリアを
+ * 非表示に戻す。
+ */
+function start2DScanner() {
+  const readerContainer = document.getElementById('qrReader');
+  readerContainer.classList.remove('hidden');
+  setStatus('caseStatus', 'カメラを起動しました。バーコードを読み取ってください');
+  // Create instance if not exists
+  if (!html5Qr2d) {
+    html5Qr2d = new Html5Qrcode('qrReader');
+  }
+  const config = { fps: 10, qrbox: 250, rememberLastUsedCamera: true };
+  const decodeCallback = async (decodedText, decodedResult) => {
+    try {
+      // Stop scanning after first success
+      await html5Qr2d.stop();
+      readerContainer.classList.add('hidden');
+      // Remove prefix
+      const prefix = 'ZLIB64:';
+      let code = decodedText;
+      if (code.startsWith(prefix)) {
+        code = code.substring(prefix.length);
+      }
+      // Base64 decode
+      const binaryString = atob(code);
+      const charData = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        charData[i] = binaryString.charCodeAt(i);
+      }
+      const inflated = pako.inflate(charData, { to: 'string' });
+      const data = JSON.parse(inflated);
+      if (data.orderNumber) document.getElementById('orderNumberInput').value = data.orderNumber;
+      if (data.customer) document.getElementById('customerInput').value = data.customer;
+      if (data.product) document.getElementById('productInput').value = data.product;
+      setStatus('caseStatus', '読み取り成功: データを入力しました');
+    } catch (err) {
+      setStatus('caseStatus', '読み取りまたは解凍に失敗: ' + err);
+    }
+  };
+  html5Qr2d.start({ facingMode: 'environment' }, config, decodeCallback, errorMessage => {
+    // ignore scan errors
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Shipments (tracking numbers) input and scanning
+
+/**
+ * 全体設定で選択された運送会社を空欄の行に適用する。上部の
+ * ドロップダウンで運送会社を指定すると、各行の運送会社が未設定の
+ * 行に対してその値を適用する。
+ */
+function applyCarrierToAll() {
+  const globalCarrier = document.getElementById('carrierAllSelect').value;
+  const selects = document.querySelectorAll('.carrierSelect');
+  selects.forEach(select => {
+    if (select.value === '' && globalCarrier) {
+      select.value = globalCarrier;
+    }
+  });
+}
+
+/**
+ * 発送情報の入力テーブルに指定された件数の行を追加する。既存の行が
+ * ある場合は末尾に追記される。各行には運送会社選択セレクト、追跡番号
+ * 入力欄、スマートフォン用カメラボタンを生成する。
+ *
+ * @param {number} count 追加する行数
+ */
+function addShipmentsRows(count) {
+  const tbody = document.getElementById('shipmentsBody');
+  const startIndex = tbody.children.length;
+  for (let i = 0; i < count; i++) {
+    const rowIndex = startIndex + i;
+    const tr = document.createElement('tr');
+    // index column
+    const tdIndex = document.createElement('td');
+    tdIndex.textContent = rowIndex + 1;
+    tr.appendChild(tdIndex);
+    // carrier select
+    const tdCarrier = document.createElement('td');
+    const select = document.createElement('select');
+    select.className = 'carrierSelect';
+    select.innerHTML = '<option value="">未設定</option>' +
+      '<option value="yamato">ヤマト</option>' +
+      '<option value="sagawa">佐川</option>' +
+      '<option value="seino">西濃</option>' +
+      '<option value="tonami">トナミ</option>' +
+      '<option value="fukuyama">福山</option>' +
+      '<option value="hida">飛騨</option>';
+    tdCarrier.appendChild(select);
+    tr.appendChild(tdCarrier);
+    // tracking input
+    const tdTracking = document.createElement('td');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'trackingInput';
+    tdTracking.appendChild(input);
+    tr.appendChild(tdTracking);
+    // camera button for smartphone
+    const tdBtn = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.textContent = 'カメラ';
+    btn.addEventListener('click', () => start1DScannerForRow(rowIndex));
+    tdBtn.appendChild(btn);
+    tr.appendChild(tdBtn);
+    tbody.appendChild(tr);
+  }
+  applyCarrierToAll();
+}
+
+/**
+ * 特定の行の 1 次元バーコードを読み取る。読み取り結果はその行の追跡番号
+ * 入力欄に自動で入力される。成功するとカメラを停止し読み取りエリアを
+ * 非表示にする。html5‑qrcode ライブラリはバージョン 2.0.0 以降で
+ * 1 次元および 2 次元コードの両方に対応している【194101813668927†L190-L194】。
+ * @param {number} rowIndex 読み取り対象となるテーブル行のインデックス
+ */
+function start1DScannerForRow(rowIndex) {
+  const readerContainer = document.getElementById('barcodeReader');
+  readerContainer.classList.remove('hidden');
+  // Create instance if necessary
+  if (!html5Qr1d) {
+    html5Qr1d = new Html5Qrcode('barcodeReader');
+  }
+  const config = {
+    fps: 10,
+    // Support 1D barcodes using supported formats list. Without
+    // specifying, it scans both QR and 1D codes【194101813668927†L59-L102】.
+    rememberLastUsedCamera: true
+  };
+  const callback = async (decodedText, decodedResult) => {
+    try {
+      await html5Qr1d.stop();
+      readerContainer.classList.add('hidden');
+      // Insert into correct row
+      const tbody = document.getElementById('shipmentsBody');
+      const tr = tbody.children[rowIndex];
+      if (tr) {
+        const input = tr.querySelector('.trackingInput');
+        input.value = decodedText;
+        setStatus('shipmentsStatus', 'バーコード読み取り成功');
+      }
+    } catch (err) {
+      setStatus('shipmentsStatus', 'バーコード読み取り失敗: ' + err);
+    }
+  };
+  html5Qr1d.start({ facingMode: 'environment' }, config, callback, err => {
+    // ignore scanning errors
+  });
+}
+
+/**
+ * 受注番号・得意先・品名がすべて入力されているかを確認し、発送情報
+ * 入力画面へ遷移する。入力値はグローバル変数 `currentCaseData` に保存
+ * しておき、発送情報と一緒に Firestore へ保存する際に使用する。
+ */
+function goToShipments() {
+  const orderNumber = document.getElementById('orderNumberInput').value.trim();
+  const customer = document.getElementById('customerInput').value.trim();
+  const product = document.getElementById('productInput').value.trim();
+  if (!orderNumber || !customer || !product) {
+    setStatus('caseStatus', '受注番号・得意先・品名をすべて入力してください');
+    return;
+  }
+  currentCaseData = { orderNumber, customer, product };
+  // Reset shipments table
+  document.getElementById('shipmentsBody').innerHTML = '';
+  addShipmentsRows(10);
+  document.getElementById('carrierAllSelect').value = '';
+  setStatus('shipmentsStatus', '');
+  showView('shipmentsView');
+}
+
+/**
+ * 発送情報入力テーブルから値を収集する。運送会社または追跡番号が空欄の
+ * 行は無視し、運送会社と追跡番号の組み合わせが重複している行は1件目
+ * だけを採用する。返り値は `{carrier, tracking}` の配列で、登録可能な
+ * 行がなければ空配列を返す。
+ */
+function collectShipmentsFromTable() {
+  const tbody = document.getElementById('shipmentsBody');
+  const shipments = [];
+  const seen = new Set();
+  for (const tr of tbody.children) {
+    const select = tr.querySelector('.carrierSelect');
+    const input = tr.querySelector('.trackingInput');
+    const carrier = select.value;
+    const tracking = input.value.trim();
+    if (carrier && tracking) {
+      const key = carrier + '|' + tracking;
+      if (!seen.has(key)) {
+        seen.add(key);
+        shipments.push({ carrier, tracking });
+      } else {
+        // skip duplicates
+      }
+    }
+  }
+  return shipments;
+}
+
+/**
+ * 現在入力されている案件情報と発送情報を Firestore に保存する。発送情報
+ * が1件もなければ保存せずにエラーを表示する。`currentCaseData` に
+ * 保存されている受注番号・得意先・品名と、テーブルから収集した
+ * 発送情報を統合し、暗号化ユーティリティで AES‑GCM 暗号化した上で
+ * `data` フィールドに格納する。また検索のために平文の受注番号・
+ * 得意先・品名・作成日時を別フィールドとして保存する。保存に成功すると
+ * 入力フォームをクリアし、一覧画面に戻る。
+ */
+async function saveCase() {
+  const shipments = collectShipmentsFromTable();
+  if (shipments.length === 0) {
+    setStatus('shipmentsStatus', '少なくとも1件の運送会社と追跡番号を入力してください');
+    return;
+  }
+  if (!currentCaseData) {
+    setStatus('shipmentsStatus', '案件情報が失われました。最初からやり直してください');
+    return;
+  }
+  try {
+    setStatus('shipmentsStatus', '保存中...');
+    // Combine with case data
+    const casePayload = {
+      ...currentCaseData,
+      shipments
+    };
+    // Encrypt the payload using the fixed secret
+    const encrypted = await EncryptionUtils.encryptData(APP_ENCRYPTION_SECRET, casePayload);
+    // Write to Firestore
+    await db.collection('cases').add({
+      uid: currentUser ? currentUser.uid : null,
+      orderNumber: currentCaseData.orderNumber,
+      customer: currentCaseData.customer,
+      product: currentCaseData.product,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      data: encrypted
+    });
+    setStatus('shipmentsStatus', '登録が完了しました');
+    // Reset forms
+    document.getElementById('orderNumberInput').value = '';
+    document.getElementById('customerInput').value = '';
+    document.getElementById('productInput').value = '';
+    currentCaseData = null;
+    currentShipments = [];
+    showView('listView');
+    await loadCasesList();
+  } catch (err) {
+    setStatus('shipmentsStatus', '保存に失敗しました: ' + err);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Cases list and search
+
+let unsubscribeCasesListener = null;
+let casesCache = [];
+
+/**
+ * Firestore から作成日時の降順で案件を読み込む。`onSnapshot` により
+ * リアルタイムで変更を監視し、新規追加や削除があると一覧を更新する。
+ * 取得した結果は検索処理用に `casesCache` にキャッシュする。ログイン
+ * 状態でのみ呼び出される。
+ */
+async function loadCasesList() {
+  setStatus('listStatus', '読み込み中...');
+  // Remove previous listener
+  if (unsubscribeCasesListener) {
+    unsubscribeCasesListener();
+    unsubscribeCasesListener = null;
+  }
+  // Query with order by
+  const query = db.collection('cases').orderBy('createdAt', 'desc');
+  unsubscribeCasesListener = query.onSnapshot(snapshot => {
+    casesCache = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      casesCache.push({ id: doc.id, orderNumber: data.orderNumber, customer: data.customer, product: data.product, createdAt: data.createdAt, encryptedData: data.data });
+    });
+    renderCaseList(casesCache);
+    setStatus('listStatus', '');
+  }, err => {
+    setStatus('listStatus', '読み込み失敗: ' + err);
+  });
+}
+
+/**
+ * 与えられた配列から案件一覧をレンダリングする。各エントリはクリック
+ * 可能で、詳細画面に遷移する。検索ボックスに入力がある場合はその
+ * キーワードを含む受注番号・得意先・品名の案件のみを表示する。
+ *
+ * @param {Array} list 表示対象の案件オブジェクト配列
+ */
+function renderCaseList(list) {
+  const container = document.getElementById('casesList');
+  container.innerHTML = '';
+  const search = document.getElementById('searchInput').value.trim().toLowerCase();
+  list.filter(item => {
+    if (!search) return true;
+    return (item.orderNumber && item.orderNumber.toLowerCase().includes(search)) ||
+           (item.customer && item.customer.toLowerCase().includes(search)) ||
+           (item.product && item.product.toLowerCase().includes(search));
+  }).forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'case-item';
+    div.textContent = `${item.orderNumber} | ${item.customer} | ${item.product}`;
+    div.addEventListener('click', () => openCaseDetails(item.id));
+    container.appendChild(div);
+  });
+  if (list.length === 0) {
+    const p = document.createElement('p');
+    p.textContent = '案件がありません。';
+    container.appendChild(p);
+  }
+}
+
+/**
+ * Filter the list when user types in search input.
+ */
+function filterCaseList() {
+  renderCaseList(casesCache);
+}
+
+// -----------------------------------------------------------------------------
+// Case details
+
+let currentDetailCaseId = null;
+let currentDetailData = null;
+
+/**
+ * 指定された案件 ID に対する詳細画面を開く。Firestore から取得した
+ * `data` フィールドを固定鍵で復号し、受注番号・得意先・品名と
+ * 発送情報を表示する。発送情報ごとに運送会社の公開ページをクロール
+ * し、配送状態を取得する。管理者 UID に該当するユーザーのみ削除ボタンを
+ * 表示する。
+ *
+ * @param {string} docId Firestore ドキュメント ID
+ */
+async function openCaseDetails(docId) {
+  // Find case data
+  const entry = casesCache.find(item => item.id === docId);
+  if (!entry) return;
+  currentDetailCaseId = docId;
+  try {
+    setStatus('detailsStatus', '読み込み中...');
+    // Decrypt using fixed secret
+    const decrypted = await EncryptionUtils.decryptData(APP_ENCRYPTION_SECRET, entry.encryptedData);
+    currentDetailData = { ...decrypted, orderNumber: entry.orderNumber, customer: entry.customer, product: entry.product };
+    // Render info
+    const infoDiv = document.getElementById('detailsInfo');
+    infoDiv.innerHTML = '';
+    const p = document.createElement('p');
+    p.innerHTML = `<strong>受注番号:</strong> ${currentDetailData.orderNumber}<br>` +
+                  `<strong>得意先:</strong> ${currentDetailData.customer}<br>` +
+                  `<strong>品名:</strong> ${currentDetailData.product}`;
+    infoDiv.appendChild(p);
+    // Render shipments
+    renderShipmentsInDetails();
+    // Show or hide delete button based on admin status
+    const deleteBtn = document.getElementById('deleteCaseButton');
+    if (currentUser && ADMIN_UIDS.includes(currentUser.uid)) {
+      deleteBtn.style.display = 'inline-block';
+    } else {
+      deleteBtn.style.display = 'none';
+    }
+    setStatus('detailsStatus', '');
+    showView('detailsView');
+  } catch (err) {
+    setStatus('detailsStatus', '復号に失敗しました: ' + err);
+  }
+}
+
+/**
+ * 詳細画面で発送情報を描画し、それぞれの追跡ステータスを表示する。
+ * 配送状態は `fetchTrackingStatus` が各社の公開ページから取得した
+ * キーワードに基づき「配達完了」「輸送中」「情報取得中」などに分類
+ * される。
+ */
+async function renderShipmentsInDetails() {
+  const container = document.getElementById('shipmentsList');
+  container.innerHTML = '';
+  const shipments = currentDetailData.shipments || [];
+  // Show each shipment with status
+  for (const ship of shipments) {
+    const div = document.createElement('div');
+    div.className = 'form-group';
+    const statusObj = await fetchTrackingStatus(ship.carrier, ship.tracking);
+    div.innerHTML = `<strong>${translateCarrier(ship.carrier)}</strong> | ${ship.tracking} | 状態: ${statusObj.status}` + (statusObj.deliveredAt ? ` (${statusObj.deliveredAt})` : '');
+    container.appendChild(div);
+  }
+  if (shipments.length === 0) {
+    container.textContent = '発送情報がありません。';
+  }
+  // Add container for additional inputs if needed
+  const extraContainer = document.createElement('div');
+  extraContainer.id = 'extraShipmentInputs';
+  container.appendChild(extraContainer);
+}
+
+/**
+ * Translate carrier codes to Japanese names for display.
+ * @param {string} code Carrier slug.
+ * @returns {string}
+ */
+function translateCarrier(code) {
+  switch (code) {
+    case 'yamato': return 'ヤマト';
+    case 'sagawa': return '佐川';
+    case 'seino': return '西濃';
+    case 'tonami': return 'トナミ';
+    case 'fukuyama': return '福山';
+    case 'hida': return '飛騨';
+    default: return code;
+  }
+}
+
+/**
+ * 詳細画面で追跡番号を追加登録するための入力欄を複数生成する。各入力セット
+ * には運送会社のセレクトボックス、追跡番号入力欄、スマホ用のカメラボタン
+ * が含まれる。追加登録ボタンを押すと新しい発送情報のみが既存データに
+ * 追加される。
+ *
+ * @param {number} count 生成する入力セットの数
+ */
+function addShipmentInputsToDetails(count) {
+  const container = document.getElementById('extraShipmentInputs');
+  for (let i = 0; i < count; i++) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'form-group';
+    // select
+    const select = document.createElement('select');
+    select.innerHTML = '<option value="">未設定</option>' +
+      '<option value="yamato">ヤマト</option>' +
+      '<option value="sagawa">佐川</option>' +
+      '<option value="seino">西濃</option>' +
+      '<option value="tonami">トナミ</option>' +
+      '<option value="fukuyama">福山</option>' +
+      '<option value="hida">飛騨</option>';
+    // input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = '追跡番号';
+    // camera button
+    const btn = document.createElement('button');
+    btn.textContent = 'カメラ';
+    btn.addEventListener('click', () => start1DScannerForExtra(input));
+    wrapper.appendChild(select);
+    wrapper.appendChild(input);
+    wrapper.appendChild(btn);
+    container.appendChild(wrapper);
+  }
+  // Add a save button if not exists
+  if (!document.getElementById('saveExtraShipmentsButton')) {
+    const saveBtn = document.createElement('button');
+    saveBtn.id = 'saveExtraShipmentsButton';
+    saveBtn.textContent = '追加登録';
+    saveBtn.addEventListener('click', saveExtraShipments);
+    container.appendChild(saveBtn);
+  }
+}
+
+/**
+ * Start 1D scanner for an input field used in details view. The
+ * scanned code fills the provided input element. The camera closes
+ * automatically after scanning.
+ * @param {HTMLInputElement} input The input field to populate.
+ */
+function start1DScannerForExtra(input) {
+  const readerContainer = document.getElementById('barcodeReader');
+  readerContainer.classList.remove('hidden');
+  if (!html5Qr1d) {
+    html5Qr1d = new Html5Qrcode('barcodeReader');
+  }
+  const config = { fps: 10, rememberLastUsedCamera: true };
+  const callback = async (decodedText) => {
+    try {
+      await html5Qr1d.stop();
+      readerContainer.classList.add('hidden');
+      input.value = decodedText;
+      setStatus('detailsStatus', 'バーコード読み取り成功');
+    } catch (err) {
+      setStatus('detailsStatus', 'バーコード読み取り失敗: ' + err);
+    }
+  };
+  html5Qr1d.start({ facingMode: 'environment' }, config, callback, err => {});
+}
+
+/**
+ * 詳細画面で入力された追加の発送情報を保存する。既存の発送情報と重複
+ * する組み合わせ（運送会社＋追跡番号）は無視され、新規分のみを
+ * `currentDetailData` に追加する。更新後に案件ドキュメントを再度
+ * 暗号化して上書きする。
+ */
+async function saveExtraShipments() {
+  const container = document.getElementById('extraShipmentInputs');
+  const children = Array.from(container.children);
+  const newShipments = [];
+  // Collect new shipments from inputs (excluding the save button)
+  for (const child of children) {
+    if (child.tagName === 'BUTTON') continue;
+    const select = child.querySelector('select');
+    const input = child.querySelector('input');
+    const carrier = select.value;
+    const tracking = input.value.trim();
+    if (carrier && tracking) {
+      newShipments.push({ carrier, tracking });
+    }
+  }
+  // Remove duplicates with existing shipments
+  const existing = new Set(currentDetailData.shipments.map(s => s.carrier + '|' + s.tracking));
+  const unique = newShipments.filter(s => !existing.has(s.carrier + '|' + s.tracking));
+  if (unique.length === 0) {
+    setStatus('detailsStatus', '新規の発送情報がありません');
+    return;
+  }
+  try {
+    setStatus('detailsStatus', '追加登録中...');
+    currentDetailData.shipments = currentDetailData.shipments.concat(unique);
+    const encrypted = await EncryptionUtils.encryptData(APP_ENCRYPTION_SECRET, currentDetailData);
+    await db.collection('cases').doc(currentDetailCaseId).update({ data: encrypted });
+    setStatus('detailsStatus', `追加登録しました (${unique.length}件)`);
+    // Clear extra inputs
+    container.innerHTML = '';
+    await openCaseDetails(currentDetailCaseId);
+  } catch (err) {
+    setStatus('detailsStatus', '追加登録に失敗: ' + err);
+  }
+}
+
+/**
+ * 現在表示している案件を削除する。管理者でない場合は操作を拒否する。
+ */
+async function deleteCurrentCase() {
+  if (!currentDetailCaseId) return;
+  if (!currentUser || !ADMIN_UIDS.includes(currentUser.uid)) {
+    alert('削除権限がありません');
+    return;
+  }
+  if (!confirm('この案件を削除しますか？')) return;
+  try {
+    await db.collection('cases').doc(currentDetailCaseId).delete();
+    setStatus('detailsStatus', '削除しました');
+    showView('listView');
+    await loadCasesList();
+  } catch (err) {
+    setStatus('detailsStatus', '削除に失敗: ' + err);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tracking status retrieval via public tracking pages
+//
+// Official carrier APIs are not used. Instead, the application
+// queries publicly accessible tracking pages through a CORS proxy
+// (https://api.allorigins.win/raw) and parses the resulting HTML.
+// Because carriers may change their page structure without notice
+// this method should be considered best‑effort. When the status
+// cannot be determined the function returns "情報取得中". Delivered
+// shipments are detected when keywords such as "配達完了" or
+// "お渡し済み" appear in the page.
+/**
+ * 各運送会社の公開されている追跡ページを CORS プロキシ経由で取得し、
+ * HTML から配送状況を判定する。GET パラメータまたは URL の形式は
+ * 運送会社ごとに異なるため `switch` 文で組み立てている。リクエストや
+ * 解析に失敗した場合は「情報取得中」として扱う。数千件レベルの
+ * リクエストでも API キーの制限を受けないよう、AfterShip を用いず
+ * 公開ページのスクレイピング方式にしている。
+ *
+ * @param {string} carrier 運送会社スラッグ（yamato, sagawa など）
+ * @param {string} tracking 追跡番号
+ * @returns {Promise<{status: string, deliveredAt: string|null}>} 状態と配達日
+ */
+async function fetchTrackingStatus(carrier, tracking) {
+  try {
+    let targetUrl;
+    switch (carrier) {
+      case 'yamato':
+        // Yamato uses a GET endpoint with number01 parameter. number00=1
+        targetUrl = `https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${tracking}`;
+        break;
+      case 'sagawa':
+        // Sagawa Express tracking page accepts okurijoNo parameter
+        targetUrl = `https://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijoinput.jsp?okurijoNo=${tracking}`;
+        break;
+      case 'seino':
+        // Seino tracking page – wbl_code=11 sets mode
+        targetUrl = `https://track.seino.co.jp/cgi-bin/gnp/GNPBTMN110.asp?wbl_code=11&bn_code=${tracking}`;
+        break;
+      case 'tonami':
+        targetUrl = `https://toi.tonami.co.jp/cgi-bin/trace/TWTRACE?transNo=${tracking}`;
+        break;
+      case 'fukuyama':
+        targetUrl = `https://corp.fukuyama.co.jp/cast/search?id=${tracking}`;
+        break;
+      case 'hida':
+        // 飛騨運輸 – hypothetical URL for demonstration
+        targetUrl = `https://www.hidayuso.co.jp/trace?no=${tracking}`;
+        break;
+      default:
+        return { status: '情報取得中', deliveredAt: null };
+    }
+    const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+    const resp = await fetch(proxied);
+    if (!resp.ok) {
+      return { status: '情報取得中', deliveredAt: null };
+    }
+    const html = await resp.text();
+    return parseStatusFromHtml(carrier, html);
+  } catch (err) {
+    return { status: '情報取得中', deliveredAt: null };
+  }
+}
+
+/**
+ * 追跡ページの HTML から配送状態を抽出する簡易パーサー。文字列に対して
+ * 「配達完了」や「発送」などのキーワードを検索し、該当するものがあれば
+ * 状態を返す。今後運送会社のページ構造が変わった場合はキーワードを
+ * 追加・調整することで対応できる。
+ *
+ * @param {string} carrier 運送会社スラッグ
+ * @param {string} html HTML コンテンツ
+ * @returns {{status: string, deliveredAt: string|null}} 状態と配達日
+ */
+function parseStatusFromHtml(carrier, html) {
+  // Normalise fullwidth characters and spaces
+  const text = html.replace(/\s+/g, '');
+  // Keywords for delivered
+  const deliveredKeywords = ['配達完了', 'お届け済', 'お届け先に配達完了', 'お届け先にお渡し済'];
+  for (const kw of deliveredKeywords) {
+    if (text.includes(kw)) {
+      return { status: '配達完了', deliveredAt: null };
+    }
+  }
+  // Keywords for in transit or pickup
+  const transitKeywords = ['発送', '出荷', '輸送中', '荷物受付', '受付', '輸送'];
+  for (const kw of transitKeywords) {
+    if (text.includes(kw)) {
+      return { status: '輸送中', deliveredAt: null };
+    }
+  }
+  // Unknown: return default
+  return { status: '情報取得中', deliveredAt: null };
+}
+
+// -----------------------------------------------------------------------------
+// Start the application
+window.addEventListener('DOMContentLoaded', init);

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>案件管理システム</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Firebase SDKs (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+  <!-- Pako for zlib inflate -->
+  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+  <!-- html5-qrcode library (supports 1D and 2D barcodes) -->
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
+  <script src="encryption.js"></script>
+  <script src="firebase-config.js"></script>
+</head>
+<body>
+  <header>
+    <h1>案件管理システム</h1>
+  </header>
+  <main>
+    <!-- Login View -->
+    <section id="loginView" class="view">
+      <h2>ログイン</h2>
+      <div class="form-group">
+        <label for="emailInput">メールアドレス</label>
+        <input type="email" id="emailInput" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label for="passwordInput">パスワード</label>
+        <input type="password" id="passwordInput" autocomplete="current-password" />
+      </div>
+      <div class="form-actions">
+        <button id="loginButton">ログイン</button>
+        <button id="goToRegisterButton" class="secondary">新規登録</button>
+      </div>
+      <p class="status" id="authStatus"></p>
+    </section>
+
+    <!-- Register View -->
+    <section id="registerView" class="view hidden">
+      <h2>新規登録</h2>
+      <div class="form-group">
+        <label for="regEmailInput">メールアドレス</label>
+        <input type="email" id="regEmailInput" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label for="regPasswordInput">パスワード</label>
+        <input type="password" id="regPasswordInput" autocomplete="new-password" />
+      </div>
+      <div class="form-group">
+        <label for="regConfirmInput">パスワード（確認）</label>
+        <input type="password" id="regConfirmInput" autocomplete="new-password" />
+      </div>
+      <div class="form-actions">
+        <button id="registerSubmitButton">登録</button>
+        <button id="cancelRegisterButton" class="secondary">キャンセル</button>
+      </div>
+      <p class="status" id="registerStatus"></p>
+    </section>
+
+    <!-- Case input View -->
+    <section id="caseInputView" class="view hidden">
+      <h2>案件追加</h2>
+      <!-- 2D barcode scanning -->
+      <div class="form-group">
+        <label>2次元バーコード読み取り（ZLIB64対応）</label>
+        <button id="scan2dButton">カメラ起動</button>
+        <div id="qrReader" class="scanner-container hidden"></div>
+      </div>
+      <div class="form-group">
+        <label for="orderNumberInput">受注番号</label>
+        <input type="text" id="orderNumberInput" />
+      </div>
+      <div class="form-group">
+        <label for="customerInput">得意先</label>
+        <input type="text" id="customerInput" />
+      </div>
+      <div class="form-group">
+        <label for="productInput">品名</label>
+        <input type="text" id="productInput" />
+      </div>
+      <div class="form-actions">
+        <button id="caseNextButton">次へ</button>
+        <button id="logoutButton" class="secondary">ログアウト</button>
+      </div>
+      <p class="status" id="caseStatus"></p>
+    </section>
+
+    <!-- Shipments input View -->
+    <section id="shipmentsView" class="view hidden">
+      <h2>運送会社・追跡番号入力</h2>
+      <div class="form-group">
+        <label for="carrierAllSelect">運送会社（全体設定）</label>
+        <select id="carrierAllSelect">
+          <option value="">未設定</option>
+          <option value="yamato">ヤマト</option>
+          <option value="sagawa">佐川</option>
+          <option value="seino">西濃</option>
+          <option value="tonami">トナミ</option>
+          <option value="fukuyama">福山</option>
+          <option value="hida">飛騨</option>
+        </select>
+      </div>
+      <table class="shipments-table">
+        <thead>
+          <tr><th>#</th><th>運送会社</th><th>追跡番号</th><th>カメラ</th></tr>
+        </thead>
+        <tbody id="shipmentsBody"></tbody>
+      </table>
+      <div class="form-actions">
+        <button id="addMoreShipmentsButton">5件追加</button>
+        <button id="saveCaseButton">登録</button>
+        <button id="backToCaseButton" class="secondary">戻る</button>
+      </div>
+      <div id="barcodeReader" class="scanner-container hidden"></div>
+      <p class="status" id="shipmentsStatus"></p>
+    </section>
+
+    <!-- Cases list View -->
+    <section id="listView" class="view hidden">
+      <h2>案件一覧</h2>
+      <div class="form-group">
+        <input type="text" id="searchInput" placeholder="検索（受注番号・得意先・品名）" />
+      </div>
+      <div id="casesList"></div>
+      <div class="form-actions">
+        <button id="refreshListButton" class="secondary">更新</button>
+        <button id="logoutButton2" class="secondary">ログアウト</button>
+      </div>
+      <p class="status" id="listStatus"></p>
+    </section>
+
+    <!-- Case details View -->
+    <section id="detailsView" class="view hidden">
+      <h2>案件詳細</h2>
+      <div id="detailsInfo"></div>
+      <h3>発送情報</h3>
+      <div id="shipmentsList"></div>
+      <div class="form-actions">
+        <button id="addMoreShipmentsDetailsButton">5件追加</button>
+        <button id="deleteCaseButton" class="secondary">案件削除</button>
+        <button id="backToListButton" class="secondary">一覧へ戻る</button>
+      </div>
+      <p class="status" id="detailsStatus"></p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

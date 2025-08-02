@@ -1,0 +1,122 @@
+/*
+ * style.css
+ *
+ * 案件管理アプリのための最小限のスタイル定義です。PC とスマートフォン
+ * の両方で快適に動作するよう軽量なデザインとなっています。必要に応じて
+ * このスタイルシートを拡張し、自社のブランドや好みに合わせてください。
+ */
+
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f9f9f9;
+  color: #333;
+}
+
+header {
+  background-color: #4a90e2;
+  color: #fff;
+  padding: 1rem;
+  text-align: center;
+}
+
+main {
+  padding: 1rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.hidden {
+  display: none;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: bold;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.form-actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+button {
+  background-color: #4a90e2;
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button.secondary {
+  background-color: #7b8ca5;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.case-item {
+  border-bottom: 1px solid #ccc;
+  padding: 0.5rem 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.case-item:last-child {
+  border-bottom: none;
+}
+
+.scanner-container {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+#qrReader,
+#barcodeReader {
+  width: 100% !important;
+  margin-top: 1rem;
+}
+
+.shipments-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.shipments-table th,
+.shipments-table td {
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+}
+
+.shipments-table th {
+  background-color: #f1f1f1;
+}
+
+.status {
+  font-size: 0.9rem;
+  color: #555;
+}
