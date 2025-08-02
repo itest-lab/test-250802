@@ -34,6 +34,7 @@
       </div>
       <div class="form-actions">
         <button id="loginButton">ログイン</button>
+        <button id="guestButton" class="secondary">ゲストログイン</button>
         <button id="goToRegisterButton" class="secondary">新規登録</button>
       </div>
       <p class="status" id="authStatus"></p>
@@ -59,6 +60,27 @@
         <button id="cancelRegisterButton" class="secondary">キャンセル</button>
       </div>
       <p class="status" id="registerStatus"></p>
+    </section>
+
+    <!-- Menu View -->
+    <section id="menuView" class="view hidden">
+      <h2>メニュー</h2>
+      <div class="form-actions">
+        <button id="menuAddCaseButton">案件追加</button>
+        <button id="menuSearchCaseButton">案件検索</button>
+      </div>
+    </section>
+
+    <!-- Add Case Start View -->
+    <section id="addCaseStartView" class="view hidden">
+      <h2>案件追加</h2>
+      <div class="form-group">
+        <label for="barcodeInput">バーコード入力</label>
+        <input type="text" id="barcodeInput" placeholder="バーコードをスキャンしてください" />
+        <button id="barcodeCameraButton">カメラ起動</button>
+        <div id="startQrReader" class="scanner-container hidden"></div>
+      </div>
+      <p class="status" id="startStatus"></p>
     </section>
 
     <!-- Case input View -->

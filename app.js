@@ -76,6 +76,8 @@ function setStatus(elementId, message) {
 function init() {
   // Buttons in login view
   document.getElementById('loginButton').addEventListener('click', login);
+  // ゲストログインボタンを追加。匿名認証を利用して一時的なアカウントを作成する。
+  document.getElementById('guestButton').addEventListener('click', guestLogin);
   // Navigate to registration view
   document.getElementById('goToRegisterButton').addEventListener('click', () => {
     document.getElementById('regEmailInput').value = '';
@@ -112,13 +114,33 @@ function init() {
     showView('loginView');
   });
 
+  // メニュー画面のボタン
+  document.getElementById('menuAddCaseButton').addEventListener('click', () => {
+    // スタート用のバーコード入力画面に遷移する。必要な状態を初期化。
+    currentCaseData = null;
+    document.getElementById('barcodeInput').value = '';
+    setStatus('startStatus', '');
+    showView('addCaseStartView');
+    // テキスト入力にフォーカスを当てる
+    setTimeout(() => document.getElementById('barcodeInput').focus(), 0);
+  });
+  document.getElementById('menuSearchCaseButton').addEventListener('click', async () => {
+    // 案件一覧ビューを表示し、最新データを読み込む
+    showView('listView');
+    await loadCasesList();
+  });
+
+  // 案件追加スタート画面のイベント
+  document.getElementById('barcodeCameraButton').addEventListener('click', startStartScanner);
+  document.getElementById('barcodeInput').addEventListener('keypress', handleBarcodeKeypress);
+
   // Auth state observer
   auth.onAuthStateChanged(async user => {
     currentUser = user;
     if (user) {
-      // Show list view by default after login
-      showView('listView');
-      await loadCasesList();
+      // ログイン直後はメニュー画面を表示する。検索や案件追加はメニューから行う。
+      showView('menuView');
+      // 案件一覧はメニューの「案件検索」ボタンを押したときに読み込む。
     } else {
       // Not logged in
       showView('loginView');
@@ -181,8 +203,22 @@ async function createAccount() {
 
 // Remove old register function. Registration is handled by createAccount()
 
-// ゲストログイン機能は固定鍵による暗号化に移行したため利用できません。
-// 登録済みユーザーのみログイン可能です。
+/**
+ * ゲストログインを行う。Firebase の匿名認証を用いて一時的なユーザー
+ * アカウントを作成し、ログイン状態にする。匿名ユーザーはメールアドレス
+ * やパスワードを入力する必要がないが、一部機能制限（例: パスワード変更など）
+ * が存在する。成功するとメニュー画面が表示される。
+ */
+async function guestLogin() {
+  try {
+    setStatus('authStatus', 'ゲストログイン中...');
+    await auth.signInAnonymously();
+    setStatus('authStatus', '');
+    // 認証状態変更ハンドラでメニューに遷移する
+  } catch (err) {
+    setStatus('authStatus', 'ゲストログイン失敗: ' + err.message);
+  }
+}
 
 /**
  * 現在のユーザーをログアウトさせる。ユーザー関連の一時情報をリセットし、
@@ -249,6 +285,108 @@ function start2DScanner() {
   html5Qr2d.start({ facingMode: 'environment' }, config, decodeCallback, errorMessage => {
     // ignore scan errors
   });
+}
+
+// -----------------------------------------------------------------------------
+// 案件追加スタート画面のバーコード読み取り
+
+/**
+ * 案件追加スタート画面でカメラを起動し、2 次元バーコードを読み取る。読み取り
+ * 成功後に `processStartCode` を呼び出し、次の画面へ遷移する。スマートフォン
+ * ではカメラボタンから起動し、PC では USB 接続バーコードリーダーからの入力を
+ * `Enter` キーで処理する。
+ */
+function startStartScanner() {
+  const container = document.getElementById('startQrReader');
+  container.classList.remove('hidden');
+  setStatus('startStatus', 'カメラを起動しました。バーコードを読み取ってください');
+  // html5Qr2d インスタンスを使い回す。既に読み取り中の場合は停止して再利用。
+  if (!html5Qr2d) {
+    html5Qr2d = new Html5Qrcode('startQrReader');
+  }
+  const config = { fps: 10, qrbox: 250, rememberLastUsedCamera: true };
+  const callback = async (decodedText, decodedResult) => {
+    try {
+      await html5Qr2d.stop();
+      container.classList.add('hidden');
+      await processStartCode(decodedText);
+    } catch (err) {
+      setStatus('startStatus', '読み取りに失敗しました: ' + err);
+    }
+  };
+  html5Qr2d.start({ facingMode: 'environment' }, config, callback, err => {
+    // スキャンエラーは無視
+  });
+}
+
+/**
+ * スタート画面の入力欄で Enter キーが押された場合の処理。入力された
+ * バーコード文字列を受け取り、必要に応じて ZLIB64 解凍を試みる。
+ * PC などのバーコードリーダーからの入力は末尾に Enter を送ることが多いため
+ * このハンドラで自動的に次の画面へ遷移する。
+ *
+ * @param {KeyboardEvent} event キーボードイベント
+ */
+function handleBarcodeKeypress(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const code = event.target.value.trim();
+    // 空白のときは何もしない
+    if (!code) return;
+    processStartCode(code);
+  }
+}
+
+/**
+ * バーコード文字列を解析して案件情報を抽出し、案件入力画面へ遷移する。
+ * ZLIB64 形式の場合はプレフィックスを除去し Base64 デコード→ zlib 展開
+ *→ JSON パースを行う。展開に失敗した場合は手動入力とみなし、空欄のまま
+ * 次の画面へ進む。成功すれば受注番号・得意先・品名を入力欄に事前設定する。
+ *
+ * @param {string} code バーコードから読み取った文字列
+ */
+async function processStartCode(code) {
+  let orderNumber = '';
+  let customer = '';
+  let product = '';
+  if (code) {
+    try {
+      let payload = code;
+      const prefix = 'ZLIB64:';
+      if (payload.startsWith(prefix)) {
+        payload = payload.substring(prefix.length);
+      }
+      // Base64 デコード
+      const binaryString = atob(payload);
+      const charData = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        charData[i] = binaryString.charCodeAt(i);
+      }
+      const inflated = pako.inflate(charData, { to: 'string' });
+      const data = JSON.parse(inflated);
+      orderNumber = data.orderNumber || '';
+      customer = data.customer || '';
+      product = data.product || '';
+      setStatus('startStatus', '読み取り成功。次の画面に移動します');
+    } catch (err) {
+      // 解凍やパースに失敗した場合は手動入力とみなす
+      setStatus('startStatus', '読み取りまたは解凍に失敗しました。手動入力してください');
+    }
+  }
+  // 次の画面に値を設定
+  document.getElementById('orderNumberInput').value = orderNumber;
+  document.getElementById('customerInput').value = customer;
+  document.getElementById('productInput').value = product;
+  // 状態リセット
+  setStatus('caseStatus', '');
+  // 案件入力画面を表示
+  showView('caseInputView');
+  // 必要に応じて入力フォーカスを設定
+  setTimeout(() => {
+    if (!orderNumber) document.getElementById('orderNumberInput').focus();
+    else if (!customer) document.getElementById('customerInput').focus();
+    else if (!product) document.getElementById('productInput').focus();
+  }, 0);
 }
 
 // -----------------------------------------------------------------------------

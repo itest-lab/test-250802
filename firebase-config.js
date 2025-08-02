@@ -11,14 +11,12 @@
  */
 
 const firebaseConfig = {
-  apiKey: "AIzaSyArSM1XI5MLkZDiDdzkLJxBwvjM4xGWS70",
-  authDomain: "test-250724.firebaseapp.com",
-  databaseURL: "https://test-250724-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "test-250724",
-  storageBucket: "test-250724.firebasestorage.app",
-  messagingSenderId: "252374655568",
-  appId: "1:252374655568:web:3e583b46468714b7b7a755",
-  measurementId: "G-5WGPKD9BP2"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 // Firebase を初期化します。このサンプルでは互換レイヤー（version 9
