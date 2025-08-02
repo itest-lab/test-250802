@@ -100,18 +100,26 @@ button:disabled {
   margin-top: 1rem;
 }
 
+/* 発送情報テーブル。スマホ画面では横スクロール可能にしてボタンが見切れないようにする */
 .shipments-table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 1rem;
+  display: block;
+  overflow-x: auto;
 }
-
+.shipments-table thead,
+.shipments-table tbody {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
 .shipments-table th,
 .shipments-table td {
   border: 1px solid #ddd;
   padding: 0.5rem;
+  white-space: nowrap;
 }
-
 .shipments-table th {
   background-color: #f1f1f1;
 }

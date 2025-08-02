@@ -36,6 +36,13 @@ let currentShipments = [];   // holds shipments before saving
 let html5Qr2d = null;
 let html5Qr1d = null;
 
+// デバイスがスマートフォンかどうかを簡易判定する。モバイル端末では
+// カメラボタンを表示し、PC では隠すために使用する。
+const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+// 自動ログアウト用のタイマー
+let autoLogoutTimer = null;
+
 // -----------------------------------------------------------------------------
 // ユーティリティ関数
 
@@ -74,6 +81,11 @@ function setStatus(elementId, message) {
  * ログアウトするとログインビューに戻ります。
  */
 function init() {
+  // ページ読み込み時に既存のログインセッションがある場合でもリセットする。
+  // リロード時の自動ログアウトを実現するため、init の最初で signOut() を
+  // 呼び出しておく。エラーは無視する。
+  auth.signOut().catch(() => {});
+
   // Buttons in login view
   document.getElementById('loginButton').addEventListener('click', login);
   // ゲストログインボタンを追加。匿名認証を利用して一時的なアカウントを作成する。
@@ -134,16 +146,67 @@ function init() {
   document.getElementById('barcodeCameraButton').addEventListener('click', startStartScanner);
   document.getElementById('barcodeInput').addEventListener('keypress', handleBarcodeKeypress);
 
+  // 手動入力ボタン：バーコードを使わずに案件入力画面へ遷移する
+  document.getElementById('manualInputButton').addEventListener('click', () => {
+    // カメラが起動していた場合は停止
+    if (html5Qr2d) {
+      html5Qr2d.stop().catch(() => {});
+    }
+    document.getElementById('startQrReader').classList.add('hidden');
+    setStatus('startStatus', '手動入力モードに切り替えました');
+    // バーコード入力欄をクリア
+    document.getElementById('barcodeInput').value = '';
+    // 次の画面を空欄で表示
+    document.getElementById('orderNumberInput').value = '';
+    document.getElementById('customerInput').value = '';
+    document.getElementById('productInput').value = '';
+    setStatus('caseStatus', '');
+    showView('caseInputView');
+    setTimeout(() => document.getElementById('orderNumberInput').focus(), 0);
+  });
+
+  // メニューへ戻るボタン
+  document.getElementById('backToMenuFromCaseButton').addEventListener('click', () => showView('menuView'));
+  document.getElementById('backToMenuFromShipmentsButton').addEventListener('click', () => showView('menuView'));
+  document.getElementById('backToMenuFromListButton').addEventListener('click', () => showView('menuView'));
+  document.getElementById('backToMenuFromStartButton').addEventListener('click', () => showView('menuView'));
+
+  // PC ではカメラ関連のボタンを非表示にする
+  if (!IS_MOBILE) {
+    const hideIds = ['barcodeCameraButton', 'scan2dButton'];
+    hideIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+
+  // 自動ログアウトタイマーのリセットをユーザー操作に紐付ける
+  function resetAutoLogoutTimer() {
+    if (autoLogoutTimer) clearTimeout(autoLogoutTimer);
+    // 30分（1800秒）で自動ログアウト
+    autoLogoutTimer = setTimeout(() => {
+      // タイマー発火時にログアウトする
+      logout();
+      alert('30分間操作がなかったためログアウトしました');
+    }, 30 * 60 * 1000);
+  }
+  // イベント登録
+  ['click', 'keypress', 'mousemove', 'touchstart'].forEach(ev => {
+    document.addEventListener(ev, resetAutoLogoutTimer);
+  });
+
   // Auth state observer
   auth.onAuthStateChanged(async user => {
     currentUser = user;
     if (user) {
-      // ログイン直後はメニュー画面を表示する。検索や案件追加はメニューから行う。
+      // ログイン直後はメニュー画面を表示し、自動ログアウトタイマーをセット
       showView('menuView');
-      // 案件一覧はメニューの「案件検索」ボタンを押したときに読み込む。
+      resetAutoLogoutTimer();
     } else {
       // Not logged in
       showView('loginView');
+      // ログアウト時にはタイマーを停止
+      if (autoLogoutTimer) clearTimeout(autoLogoutTimer);
     }
   });
 }
@@ -229,6 +292,8 @@ async function logout() {
   currentCaseData = null;
   currentShipments = [];
   showView('loginView');
+  // 自動ログアウトタイマーを停止
+  if (autoLogoutTimer) clearTimeout(autoLogoutTimer);
 }
 
 // -----------------------------------------------------------------------------
@@ -449,6 +514,10 @@ function addShipmentsRows(count) {
     const btn = document.createElement('button');
     btn.textContent = 'カメラ';
     btn.addEventListener('click', () => start1DScannerForRow(rowIndex));
+    // PC 環境ではカメラボタンを非表示にする
+    if (!IS_MOBILE) {
+      btn.style.display = 'none';
+    }
     tdBtn.appendChild(btn);
     tr.appendChild(tdBtn);
     tbody.appendChild(tr);
@@ -792,6 +861,10 @@ function addShipmentInputsToDetails(count) {
     const btn = document.createElement('button');
     btn.textContent = 'カメラ';
     btn.addEventListener('click', () => start1DScannerForExtra(input));
+    // PC ではカメラボタンを表示しない
+    if (!IS_MOBILE) {
+      btn.style.display = 'none';
+    }
     wrapper.appendChild(select);
     wrapper.appendChild(input);
     wrapper.appendChild(btn);
