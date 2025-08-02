@@ -12,19 +12,31 @@
 - Firebase Authentication (ゲスト／メール登録／管理者権限)
 - Firestore にデータ保存（cases, shipments コレクション）
 - AES-256-GCM によるデータ暗号化
-- スクレイピングによるステータス取得エンドポイント
+- スクレイピングによるステータス取得エンドポイント（6キャリア対応）
 
-### 環境変数
-- `FIREBASE_SERVICE_ACCOUNT`：サービスアカウントJSON（文字列）
-- `FIREBASE_PROJECT_ID`：Firebase プロジェクトID
-- `ENCRYPTION_KEY`：32バイトのランダムな hex 文字列
+## GitHubへのデプロイ
+1. リポジトリを GitHub にプッシュ（`main` ブランチ）
+2. GitHub Pages 用ワークフローを有効化  
+   - `.github/workflows/pages.yml` を参照  
+3. Vercel に同リポジトリを連携し、`api/` 配下を Functions としてデプロイ  
+4. Vercel の環境変数に以下を設定  
+   - `FIREBASE_SERVICE_ACCOUNT`  
+   - `FIREBASE_PROJECT_ID`  
+   - `ENCRYPTION_KEY`
 
 ## セットアップ
-1. GitHub リポジトリにプッシュ
-2. GitHub Pages で `frontend/build` をホスティング
-3. Vercel に同リポジトリを連携し、API フォルダを Functions として設定
-4. Vercel の環境変数に上記3つを設定
-5. フロントエンド `npm install` → `npm run build` → デプロイ
+1. フロントエンド  
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   ```
+2. API  
+   ```bash
+   # Vercel CLI でもセットアップ可能
+   vercel env add FIREBASE_SERVICE_ACCOUNT
+   vercel env add FIREBASE_PROJECT_ID
+   vercel env add ENCRYPTION_KEY
+   ```
 
-詳細は各ディレクトリのコメントを参照してください。
-"# test-250802" 
+各コードはコメント参照の上、適宜カスタマイズしてください。
