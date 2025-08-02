@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>案件管理システム</title>
   <link rel="stylesheet" href="style.css">
-  <!-- Firebase SDKs (compat) -->
+  <!-- Firebase SDK (互換版) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
-  <!-- Pako for zlib inflate -->
+  <!-- ZLIB 展開用 Pako ライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
-  <!-- html5-qrcode library (supports 1D and 2D barcodes) -->
+  <!-- QR/バーコード読み取り用 html5-qrcode -->
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
   <script src="encryption.js"></script>
   <script src="firebase-config.js"></script>
@@ -19,10 +19,11 @@
 <body>
   <header>
     <h1>案件管理システム</h1>
+    <!-- ヘッダー右下に常駐するログアウトボタン -->
     <button id="globalLogoutButton" class="logout-top secondary hidden">ログアウト</button>
   </header>
   <main>
-    <!-- Login View -->
+    <!-- ログイン画面 -->
     <section id="loginView" class="view">
       <h2>ログイン</h2>
       <div class="form-group">
@@ -41,7 +42,7 @@
       <p class="status" id="authStatus"></p>
     </section>
 
-    <!-- Register View -->
+    <!-- 新規登録画面 -->
     <section id="registerView" class="view hidden">
       <h2>新規登録</h2>
       <div class="form-group">
@@ -63,7 +64,7 @@
       <p class="status" id="registerStatus"></p>
     </section>
 
-    <!-- Menu View -->
+    <!-- メニュー画面 -->
     <section id="menuView" class="view hidden">
       <h2>メニュー</h2>
       <div class="form-actions">
@@ -72,15 +73,18 @@
       </div>
     </section>
 
-    <!-- Add Case Start View -->
+    <!-- 案件追加：バーコード入力開始 -->
     <section id="addCaseStartView" class="view hidden">
       <h2>案件追加</h2>
       <div class="form-group">
         <label for="barcodeInput">バーコード入力</label>
-        <!-- 入力値は半角のみ許可するため halfwidth クラスを付与 -->
+        <!-- 半角のみ許可 -->
         <input type="text" id="barcodeInput" class="halfwidth" placeholder="バーコードをスキャンしてください" />
+        <!-- カメラ読み取り開始 -->
         <button id="barcodeCameraButton">カメラ起動</button>
+        <!-- 手動入力モードへの切り替え -->
         <button id="manualInputButton" class="secondary">手動入力</button>
+        <!-- QRリーダーの表示領域（初期は非表示）-->
         <div id="startQrReader" class="scanner-container hidden"></div>
       </div>
       <p class="status" id="startStatus"></p>
@@ -89,18 +93,16 @@
       </div>
     </section>
 
-    <!-- Case input View -->
+    <!-- 案件情報入力（手動入力 or デコード後）-->
     <section id="caseInputView" class="view hidden">
-      <h2>案件追加</h2>
-      <!-- 2D barcode scanning -->
+      <h2>案件情報入力</h2>
       <div class="form-group" id="scan2dContainer">
         <label id="scan2dLabel">2次元バーコード読み取り（ZLIB64対応）</label>
         <button id="scan2dButton">カメラ起動</button>
         <div id="qrReader" class="scanner-container hidden"></div>
       </div>
-      <!-- モード切替ボタン（手動⇔バーコード） -->
       <div class="form-group">
-        <!-- 初期状態はバーコード読み取りモードで表示され、手動入力に切り替えるボタン -->
+        <!-- モード切り替え -->
         <button id="switchInputModeButton" class="secondary">手動入力に切り替え</button>
       </div>
       <div class="form-group">
@@ -122,10 +124,10 @@
       <p class="status" id="caseStatus"></p>
     </section>
 
-    <!-- Shipments input View -->
+    <!-- 発送情報入力 -->
     <section id="shipmentsView" class="view hidden">
-      <h2>運送会社・追跡番号入力</h2>
-      <!-- 案件情報を表示するサマリー -->
+      <h2>発送情報入力</h2>
+      <!-- 案件サマリー -->
       <div id="caseSummary" class="form-group"></div>
       <div class="form-group">
         <label for="carrierAllSelect">運送会社（全体設定）</label>
@@ -135,7 +137,7 @@
           <option value="sagawa">佐川</option>
           <option value="seino">西濃</option>
           <option value="tonami">トナミ</option>
-          <option value="fukuyama">福山</option>
+          <option value="fukutsu">福通</option>
           <option value="hida">飛騨</option>
         </select>
       </div>
@@ -155,7 +157,7 @@
       <p class="status" id="shipmentsStatus"></p>
     </section>
 
-    <!-- Cases list View -->
+    <!-- 案件一覧 -->
     <section id="listView" class="view hidden">
       <h2>案件一覧</h2>
       <div class="form-group">
@@ -175,7 +177,7 @@
       <p class="status" id="listStatus"></p>
     </section>
 
-    <!-- Case details View -->
+    <!-- 詳細画面 -->
     <section id="detailsView" class="view hidden">
       <h2>案件詳細</h2>
       <div id="detailsInfo"></div>
@@ -189,7 +191,6 @@
       <p class="status" id="detailsStatus"></p>
     </section>
   </main>
-
   <script src="app.js"></script>
 </body>
 </html>
