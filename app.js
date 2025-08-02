@@ -429,10 +429,18 @@ function start2DScanner() {
       }
       const inflated = pako.inflate(charData, { to: 'string' });
       const data = JSON.parse(inflated);
-      if (data.orderNumber) document.getElementById('orderNumberInput').value = data.orderNumber;
-      if (data.customer) document.getElementById('customerInput').value = data.customer;
-      if (data.product) document.getElementById('productInput').value = data.product;
-      setStatus('caseStatus', '読み取り成功: データを入力しました');
+      if (Array.isArray(data)) {
+        // 配列の場合は [受注番号, 得意先, 品名] の順に読み取る
+        if (data.length > 0) document.getElementById('orderNumberInput').value = data[0];
+        if (data.length > 1) document.getElementById('customerInput').value    = data[1];
+        if (data.length > 2) document.getElementById('productInput').value     = data[2];
+      } else {
+    // 従来どおりオブジェクトのプロパティ名で取得
+        if (data.orderNumber) document.getElementById('orderNumberInput').value = data.orderNumber;
+        if (data.customer)    document.getElementById('customerInput').value    = data.customer;
+        if (data.product)     document.getElementById('productInput').value     = data.product;
+      }
+    setStatus('caseStatus', '読み取り成功: データを入力しました');
     } catch (err) {
       setStatus('caseStatus', '読み取りまたは解凍に失敗: ' + err);
     }
@@ -611,9 +619,17 @@ async function processStartCode(code) {
       }
       const inflated = pako.inflate(charData, { to: 'string' });
       const data = JSON.parse(inflated);
-      orderNumber = data.orderNumber || '';
-      customer = data.customer || '';
-      product = data.product || '';
+      if (Array.isArray(data)) {
+          // 配列形式のときは順番に取り出す
+          orderNumber = data[0] || '';
+          customer    = data[1] || '';
+          product     = data[2] || '';
+      } else {
+          // 従来どおりオブジェクトのプロパティ名で取得
+          orderNumber = data.orderNumber || '';
+          customer    = data.customer    || '';
+          product     = data.product     || '';
+      }
       setStatus('startStatus', '読み取り成功。次の画面に移動します');
       // orderNumber・customer・product がすべて非空なら次の画面へ自動遷移する
       autoProceed = !!(orderNumber && customer && product);
