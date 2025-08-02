@@ -36,6 +36,11 @@ let currentShipments = [];   // holds shipments before saving
 let html5Qr2d = null;
 let html5Qr1d = null;
 
+// ケース入力画面で手動モードかどうかを記録する。true の場合はスキャン用
+// コンテナを非表示にし、「バーコード入力に切り替え」というボタン表示に
+// 変更する。
+let isManualCaseInputMode = false;
+
 // デバイスがスマートフォンかどうかを簡易判定する。モバイル端末では
 // カメラボタンを表示し、PC では隠すために使用する。
 const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -163,6 +168,25 @@ function init() {
     setStatus('caseStatus', '');
     showView('caseInputView');
     setTimeout(() => document.getElementById('orderNumberInput').focus(), 0);
+    // 手動モードに切り替える
+    isManualCaseInputMode = true;
+    document.getElementById('scan2dContainer').style.display = 'none';
+    const switchBtn = document.getElementById('switchInputModeButton');
+    if (switchBtn) switchBtn.textContent = 'バーコード入力に切り替え';
+  });
+
+  // 入力モード切替ボタン
+  document.getElementById('switchInputModeButton').addEventListener('click', () => {
+    // トグル
+    isManualCaseInputMode = !isManualCaseInputMode;
+    if (isManualCaseInputMode) {
+      // 手動モード: スキャンコンテナ非表示
+      document.getElementById('scan2dContainer').style.display = 'none';
+      document.getElementById('switchInputModeButton').textContent = 'バーコード入力に切り替え';
+    } else {
+      document.getElementById('scan2dContainer').style.display = '';
+      document.getElementById('switchInputModeButton').textContent = '手動入力に切り替え';
+    }
   });
 
   // メニューへ戻るボタン
@@ -177,6 +201,10 @@ function init() {
     hideIds.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
+    });
+    // カメラ列全体を非表示にする
+    document.querySelectorAll('.camera-col').forEach(el => {
+      el.style.display = 'none';
     });
   }
 
@@ -347,9 +375,30 @@ function start2DScanner() {
       setStatus('caseStatus', '読み取りまたは解凍に失敗: ' + err);
     }
   };
-  html5Qr2d.start({ facingMode: 'environment' }, config, decodeCallback, errorMessage => {
-    // ignore scan errors
-  });
+  html5Qr2d.start({ facingMode: 'environment' }, config, decodeCallback)
+    .catch(() => {
+      // カメラの起動に失敗した場合はファイルから読み取る
+      setStatus('caseStatus', 'カメラを使用できませんでした。写真から読み取ります');
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.capture = 'environment';
+      fileInput.onchange = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        try {
+          if (!html5Qr2d) {
+            html5Qr2d = new Html5Qrcode('qrReader');
+          }
+          const result = await html5Qr2d.scanFile(file, true);
+          // ファイル読み取り成功時は callback のロジックを再利用
+          await decodeCallback(result, null);
+        } catch (err) {
+          setStatus('caseStatus', '画像からの読み取りに失敗しました: ' + err);
+        }
+      };
+      fileInput.click();
+    });
 }
 
 // -----------------------------------------------------------------------------
@@ -379,9 +428,35 @@ function startStartScanner() {
       setStatus('startStatus', '読み取りに失敗しました: ' + err);
     }
   };
-  html5Qr2d.start({ facingMode: 'environment' }, config, callback, err => {
-    // スキャンエラーは無視
-  });
+  // start() は Promise を返すため、カメラ起動に失敗した場合は
+  // input type=file を用いたフォールバックを試みる。
+  html5Qr2d.start({ facingMode: 'environment' }, config, callback)
+    .catch(() => {
+      // フォールバック: 画像を撮影して読み取る
+      setStatus('startStatus', 'カメラを使用できませんでした。写真から読み取ります');
+      // ファイル入力を作成
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      // capture 属性はモバイルブラウザでカメラ起動を促す
+      fileInput.capture = 'environment';
+      fileInput.onchange = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        // html5Qr2d.scanFile() はファイルから QR/バーコードを読み取る
+        try {
+          if (!html5Qr2d) {
+            html5Qr2d = new Html5Qrcode('startQrReader');
+          }
+          const result = await html5Qr2d.scanFile(file, true);
+          await processStartCode(result);
+        } catch (err) {
+          setStatus('startStatus', '画像からの読み取りに失敗しました: ' + err);
+        }
+      };
+      // モーダルなどは用意せず直接 click() で起動
+      fileInput.click();
+    });
 }
 
 /**
@@ -511,14 +586,17 @@ function addShipmentsRows(count) {
     tr.appendChild(tdTracking);
     // camera button for smartphone
     const tdBtn = document.createElement('td');
+    tdBtn.className = 'camera-col';
     const btn = document.createElement('button');
     btn.textContent = 'カメラ';
     btn.addEventListener('click', () => start1DScannerForRow(rowIndex));
-    // PC 環境ではカメラボタンを非表示にする
+    // PC 環境ではカメラ列を丸ごと非表示にする
     if (!IS_MOBILE) {
-      btn.style.display = 'none';
+      tdBtn.style.display = 'none';
+    } else {
+      // スマホの場合のみカメラボタンを表示
+      tdBtn.appendChild(btn);
     }
-    tdBtn.appendChild(btn);
     tr.appendChild(tdBtn);
     tbody.appendChild(tr);
   }
@@ -585,6 +663,11 @@ function goToShipments() {
   addShipmentsRows(10);
   document.getElementById('carrierAllSelect').value = '';
   setStatus('shipmentsStatus', '');
+  // サマリー表示を更新する
+  const summaryDiv = document.getElementById('caseSummary');
+  if (summaryDiv) {
+    summaryDiv.innerHTML = `<strong>受注番号:</strong> ${orderNumber}　<strong>得意先:</strong> ${customer}　<strong>品名:</strong> ${product}`;
+  }
   showView('shipmentsView');
 }
 
@@ -997,25 +1080,24 @@ async function fetchTrackingStatus(carrier, tracking) {
     switch (carrier) {
       case 'yamato':
         // Yamato uses a GET endpoint with number01 parameter. number00=1
-        targetUrl = `https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${tracking}`;
+        // HTTP 接続の方がリダイレクトや CORS の制約が少ないため http を使用
+        targetUrl = `http://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${tracking}`;
         break;
       case 'sagawa':
-        // Sagawa Express tracking page accepts okurijoNo parameter
-        targetUrl = `https://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijoinput.jsp?okurijoNo=${tracking}`;
+        targetUrl = `http://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijoinput.jsp?okurijoNo=${tracking}`;
         break;
       case 'seino':
-        // Seino tracking page – wbl_code=11 sets mode
-        targetUrl = `https://track.seino.co.jp/cgi-bin/gnp/GNPBTMN110.asp?wbl_code=11&bn_code=${tracking}`;
+        targetUrl = `http://track.seino.co.jp/cgi-bin/gnp/GNPBTMN110.asp?wbl_code=11&bn_code=${tracking}`;
         break;
       case 'tonami':
-        targetUrl = `https://toi.tonami.co.jp/cgi-bin/trace/TWTRACE?transNo=${tracking}`;
+        targetUrl = `http://toi.tonami.co.jp/cgi-bin/trace/TWTRACE?transNo=${tracking}`;
         break;
       case 'fukuyama':
-        targetUrl = `https://corp.fukuyama.co.jp/cast/search?id=${tracking}`;
+        targetUrl = `http://corp.fukuyama.co.jp/cast/search?id=${tracking}`;
         break;
       case 'hida':
-        // 飛騨運輸 – hypothetical URL for demonstration
-        targetUrl = `https://www.hidayuso.co.jp/trace?no=${tracking}`;
+        // 飛騨運輸 – 仮の URL。実際のドメインが http のみの場合も考慮。
+        targetUrl = `http://www.hidayuso.co.jp/trace?no=${tracking}`;
         break;
       default:
         return { status: '情報取得中', deliveredAt: null };

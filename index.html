@@ -91,10 +91,15 @@
     <section id="caseInputView" class="view hidden">
       <h2>案件追加</h2>
       <!-- 2D barcode scanning -->
-      <div class="form-group">
-        <label>2次元バーコード読み取り（ZLIB64対応）</label>
+      <div class="form-group" id="scan2dContainer">
+        <label id="scan2dLabel">2次元バーコード読み取り（ZLIB64対応）</label>
         <button id="scan2dButton">カメラ起動</button>
         <div id="qrReader" class="scanner-container hidden"></div>
+      </div>
+      <!-- モード切替ボタン（手動⇔バーコード） -->
+      <div class="form-group">
+        <!-- 初期状態はバーコード読み取りモードで表示され、手動入力に切り替えるボタン -->
+        <button id="switchInputModeButton" class="secondary">手動入力に切り替え</button>
       </div>
       <div class="form-group">
         <label for="orderNumberInput">受注番号</label>
@@ -119,6 +124,8 @@
     <!-- Shipments input View -->
     <section id="shipmentsView" class="view hidden">
       <h2>運送会社・追跡番号入力</h2>
+      <!-- 案件情報を表示するサマリー -->
+      <div id="caseSummary" class="form-group"></div>
       <div class="form-group">
         <label for="carrierAllSelect">運送会社（全体設定）</label>
         <select id="carrierAllSelect">
@@ -133,7 +140,7 @@
       </div>
       <table class="shipments-table">
         <thead>
-          <tr><th>#</th><th>運送会社</th><th>追跡番号</th><th>カメラ</th></tr>
+          <tr><th>#</th><th>運送会社</th><th>追跡番号</th><th class="camera-col">カメラ</th></tr>
         </thead>
         <tbody id="shipmentsBody"></tbody>
       </table>
