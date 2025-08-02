@@ -375,30 +375,52 @@ function start2DScanner() {
       setStatus('caseStatus', '読み取りまたは解凍に失敗: ' + err);
     }
   };
-  html5Qr2d.start({ facingMode: 'environment' }, config, decodeCallback)
-    .catch(() => {
-      // カメラの起動に失敗した場合はファイルから読み取る
-      setStatus('caseStatus', 'カメラを使用できませんでした。写真から読み取ります');
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*';
-      fileInput.capture = 'environment';
-      fileInput.onchange = async (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        try {
-          if (!html5Qr2d) {
-            html5Qr2d = new Html5Qrcode('qrReader');
-          }
-          const result = await html5Qr2d.scanFile(file, true);
-          // ファイル読み取り成功時は callback のロジックを再利用
-          await decodeCallback(result, null);
-        } catch (err) {
-          setStatus('caseStatus', '画像からの読み取りに失敗しました: ' + err);
+  if (IS_MOBILE) {
+    // モバイルではファイル入力で撮影・読み取り
+    setStatus('caseStatus', 'カメラを起動します');
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.capture = 'environment';
+    fileInput.onchange = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        if (!html5Qr2d) {
+          html5Qr2d = new Html5Qrcode('qrReader');
         }
-      };
-      fileInput.click();
-    });
+        const result = await html5Qr2d.scanFile(file, true);
+        await decodeCallback(result, null);
+      } catch (err) {
+        setStatus('caseStatus', '画像からの読み取りに失敗しました: ' + err);
+      }
+    };
+    fileInput.click();
+  } else {
+    html5Qr2d.start({ facingMode: 'environment' }, config, decodeCallback)
+      .catch(() => {
+        // PC でもカメラが使えない場合はフォールバック
+        setStatus('caseStatus', 'カメラを使用できませんでした。写真から読み取ります');
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.capture = 'environment';
+        fileInput.onchange = async (event) => {
+          const file = event.target.files[0];
+          if (!file) return;
+          try {
+            if (!html5Qr2d) {
+              html5Qr2d = new Html5Qrcode('qrReader');
+            }
+            const result = await html5Qr2d.scanFile(file, true);
+            await decodeCallback(result, null);
+          } catch (err) {
+            setStatus('caseStatus', '画像からの読み取りに失敗しました: ' + err);
+          }
+        };
+        fileInput.click();
+      });
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -430,33 +452,54 @@ function startStartScanner() {
   };
   // start() は Promise を返すため、カメラ起動に失敗した場合は
   // input type=file を用いたフォールバックを試みる。
-  html5Qr2d.start({ facingMode: 'environment' }, config, callback)
-    .catch(() => {
-      // フォールバック: 画像を撮影して読み取る
-      setStatus('startStatus', 'カメラを使用できませんでした。写真から読み取ります');
-      // ファイル入力を作成
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*';
-      // capture 属性はモバイルブラウザでカメラ起動を促す
-      fileInput.capture = 'environment';
-      fileInput.onchange = async (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        // html5Qr2d.scanFile() はファイルから QR/バーコードを読み取る
-        try {
-          if (!html5Qr2d) {
-            html5Qr2d = new Html5Qrcode('startQrReader');
-          }
-          const result = await html5Qr2d.scanFile(file, true);
-          await processStartCode(result);
-        } catch (err) {
-          setStatus('startStatus', '画像からの読み取りに失敗しました: ' + err);
+  // スマホではブラウザ内カメラが起動しない場合が多いため、
+  // 直接ファイル入力から撮影・読み取りを行う
+  if (IS_MOBILE) {
+    // フォールバックのみを実行
+    setStatus('startStatus', 'カメラを起動します');
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.capture = 'environment';
+    fileInput.onchange = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        if (!html5Qr2d) {
+          html5Qr2d = new Html5Qrcode('startQrReader');
         }
-      };
-      // モーダルなどは用意せず直接 click() で起動
-      fileInput.click();
-    });
+        const result = await html5Qr2d.scanFile(file, true);
+        await processStartCode(result);
+      } catch (err) {
+        setStatus('startStatus', '画像からの読み取りに失敗しました: ' + err);
+      }
+    };
+    fileInput.click();
+  } else {
+    html5Qr2d.start({ facingMode: 'environment' }, config, callback)
+      .catch(() => {
+        // PC でもカメラが使えない場合はフォールバック
+        setStatus('startStatus', 'カメラを使用できませんでした。写真から読み取ります');
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.capture = 'environment';
+        fileInput.onchange = async (event) => {
+          const file = event.target.files[0];
+          if (!file) return;
+          try {
+            if (!html5Qr2d) {
+              html5Qr2d = new Html5Qrcode('startQrReader');
+            }
+            const result = await html5Qr2d.scanFile(file, true);
+            await processStartCode(result);
+          } catch (err) {
+            setStatus('startStatus', '画像からの読み取りに失敗しました: ' + err);
+          }
+        };
+        fileInput.click();
+      });
+  }
 }
 
 /**
@@ -508,6 +551,8 @@ async function processStartCode(code) {
       customer = data.customer || '';
       product = data.product || '';
       setStatus('startStatus', '読み取り成功。次の画面に移動します');
+      // 自動的に次の画面（運送会社・追跡番号入力）へ遷移させるためのフラグ
+      const autoProceed = orderNumber && customer && product;
     } catch (err) {
       // 解凍やパースに失敗した場合は手動入力とみなす
       setStatus('startStatus', '読み取りまたは解凍に失敗しました。手動入力してください');
@@ -520,13 +565,30 @@ async function processStartCode(code) {
   // 状態リセット
   setStatus('caseStatus', '');
   // 案件入力画面を表示
-  showView('caseInputView');
-  // 必要に応じて入力フォーカスを設定
-  setTimeout(() => {
-    if (!orderNumber) document.getElementById('orderNumberInput').focus();
-    else if (!customer) document.getElementById('customerInput').focus();
-    else if (!product) document.getElementById('productInput').focus();
-  }, 0);
+  // すべての項目が取得できた場合は自動的に発送情報入力画面へ
+  if (autoProceed) {
+    // currentCaseData を仮登録して shipment に進む
+    currentCaseData = { orderNumber, customer, product };
+    // Reset shipments and show shipments view via goToShipments logic
+    document.getElementById('shipmentsBody').innerHTML = '';
+    addShipmentsRows(10);
+    document.getElementById('carrierAllSelect').value = '';
+    setStatus('shipmentsStatus', '');
+    const summaryDiv = document.getElementById('caseSummary');
+    if (summaryDiv) {
+      summaryDiv.innerHTML = `<strong>受注番号:</strong> ${orderNumber}<br><strong>得意先:</strong> ${customer}<br><strong>品名:</strong> ${product}`;
+    }
+    showView('shipmentsView');
+  } else {
+    // 案件入力画面を表示
+    showView('caseInputView');
+    // フォーカス設定
+    setTimeout(() => {
+      if (!orderNumber) document.getElementById('orderNumberInput').focus();
+      else if (!customer) document.getElementById('customerInput').focus();
+      else if (!product) document.getElementById('productInput').focus();
+    }, 0);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -666,7 +728,7 @@ function goToShipments() {
   // サマリー表示を更新する
   const summaryDiv = document.getElementById('caseSummary');
   if (summaryDiv) {
-    summaryDiv.innerHTML = `<strong>受注番号:</strong> ${orderNumber}　<strong>得意先:</strong> ${customer}　<strong>品名:</strong> ${product}`;
+    summaryDiv.innerHTML = `<strong>受注番号:</strong> ${orderNumber}<br><strong>得意先:</strong> ${customer}<br><strong>品名:</strong> ${product}`;
   }
   showView('shipmentsView');
 }
