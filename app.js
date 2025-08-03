@@ -203,6 +203,15 @@ function addShipmentsRows(count) {
         }
       }
     });
+    // 入力時に全角→半角へ変換し、半角英数字のみを許可
+    inp.addEventListener('input', e => {
+      let val = e.target.value;
+      // 全角を半角に変換
+      val = toHalfWidth(val);
+      // 半角英数字以外を除外
+      val = val.replace(/[^0-9A-Za-z]/g, '');
+      e.target.value = val;
+    });
     tdTrack.appendChild(inp);
     // PC ではカメラ列を表示しないため、画面幅に応じてカメラ列を追加
     const isPC = window.matchMedia('(min-width: 768px)').matches;
@@ -298,25 +307,23 @@ async function saveCase() {
     if (editingCaseId) {
       // 既存案件に発送情報を追加する
       const docRef = db.collection('cases').doc(editingCaseId);
-      const docSnap = await docRef.get();
-      const existingData = docSnap.exists ? docSnap.data() : null;
-      const existingShipments = existingData && Array.isArray(existingData.shipments) ? existingData.shipments : [];
-      // 既存発送情報に新規発送情報を追加
-      const newShipments = existingShipments.concat(shipments);
-      // 更新するフィールドを構築（基本情報も更新しておく）
-      await docRef.update({
-        orderNumber,
-        customer,
-        product,
-        shipments: newShipments,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      alert('発送情報を追加しました');
-      // 編集モードを解除
-      editingCaseId = null;
-      detailsCaseData = null;
-      // 詳細ページを再表示してステータス取得
-      showCaseDetails(docRef.id);
+      try {
+        // 各新規発送オブジェクトを arrayUnion で追加
+        for (const ship of shipments) {
+          await docRef.update({
+            shipments: firebase.firestore.FieldValue.arrayUnion(ship)
+          });
+        }
+        alert('発送情報を追加しました');
+        // 編集モードを解除
+        const id = editingCaseId;
+        editingCaseId = null;
+        detailsCaseData = null;
+        // 再度詳細を表示
+        showCaseDetails(id);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = '登録に失敗しました: ' + e.message;
+      }
     } else {
       // 新規登録
       await db.collection('cases').add({
@@ -680,7 +687,37 @@ function start2dScan(containerId) {
     (errorMessage) => {
       // 読み取り失敗時は何もしない
     }
-  );
+  ).catch(err => {
+    // カメラ利用に失敗した場合はファイル入力からの読み取りを試みる
+    console.warn('QRコードスキャナー起動失敗:', err);
+    // ファイル入力要素を生成
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*;capture=camera';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+    fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      try {
+        const qr = new Html5Qrcode(containerId);
+        const result = await qr.scanFile(file, true);
+        const text = toHalfWidth(result.trim());
+        processStartCode(text);
+        // 使用後にリーダーをクリア
+        await qr.clear();
+      } catch (err2) {
+        console.error('ファイルからのQR読み取り失敗:', err2);
+        alert('QRコードの読み取りに失敗しました。バーコードを手動で入力してください。');
+      } finally {
+        fileInput.remove();
+        // スキャン用コンテナを非表示
+        scanContainer.classList.add('hidden');
+      }
+    });
+    // ユーザーにファイル選択（カメラ起動）を促す
+    fileInput.click();
+  });
 }
 
 /**
