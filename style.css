@@ -159,3 +159,14 @@ button:disabled {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* PC画面ではスマホ専用機能（バーコードカメラ等）を非表示にする */
+@media (min-width: 768px) {
+  #scan2dContainer,
+  .camera-col,
+  #barcodeCameraButton,
+  #scan2dButton,
+  #startQrReader {
+    display: none;
+  }
+}

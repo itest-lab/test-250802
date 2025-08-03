@@ -1,20 +1,20 @@
 /*
- * encryption.js
- *
- * このモジュールは AES‑GCM を利用した簡易的な暗号化／復号処理を
- * 提供します。暗号化キーは PBKDF2 によってパスフレーズから導出
- * されるため、ソースコード内に鍵をハードコードする必要がありません。
- * 暗号化結果には初期化ベクトル (IV) と暗号化したデータを配列形式で
- * 保持し、そのまま JSON としてデータベースに保存することができます。
- * グローバルオブジェクト `EncryptionUtils` に非同期関数
- * `encryptData` と `decryptData` を公開しています。
- *
- * 利用例:
- *   // オブジェクトを暗号化
- *   const payload = await EncryptionUtils.encryptData('パスフレーズ', {foo: 'bar'});
- *   // 後で復号化
- *   const obj = await EncryptionUtils.decryptData('パスフレーズ', payload);
- */
+     * encryption.js
+     *
+     * このモジュールは AES‑GCM を利用した簡易的な暗号化／復号処理を
+     * 提供します。暗号化キーは PBKDF2 によってパスフレーズから導出
+     * されるため、ソースコード内に鍵をハードコードする必要がありません。
+     * 暗号化結果には初期化ベクトル (IV) と暗号化したデータを配列形式で
+     * 保持し、そのまま JSON としてデータベースに保存することができます。
+     * グローバルオブジェクト `EncryptionUtils` に非同期関数
+     * `encryptData` と `decryptData` を公開しています。
+     *
+     * 利用例:
+     *   // オブジェクトを暗号化
+     *   const payload = await EncryptionUtils.encryptData('パスフレーズ', {foo: 'bar'});
+     *   // 後で復号化
+     *   const obj = await EncryptionUtils.decryptData('パスフレーズ', payload);
+     */
 
 (() => {
   const SALT = '案件管理システム固定ソルト';
