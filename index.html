@@ -1,78 +1,48 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>案件管理システム</title>
-  <link rel="stylesheet" href="style.css">
-  <!-- Firebase SDKs（互換版） -->
+  <link rel="stylesheet" href="style.css" />
+  <!-- Firebase compat SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
-  <!-- Pako：zlib 圧縮展開用ライブラリ -->
+  <!-- Pako (zlib) -->
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
-  <!-- html5-qrcode：1D/2D バーコード読み取りライブラリ -->
+  <!-- html5-qrcode -->
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
-  <!-- 暗号化ユーティリティ -->
-  <script src="encryption.js"></script>
-  <!-- Firebase 初期化設定 -->
-  <script src="firebase-config.js"></script>
 </head>
 <body>
   <header>
     <h1>案件管理システム</h1>
-    <!-- ヘッダー右下に配置するログアウトボタン -->
     <button id="globalLogoutButton" class="logout-top secondary hidden">ログアウト</button>
   </header>
   <main>
-    <!-- ログイン画面 -->
+    <!-- ログイン -->
     <section id="loginView" class="view">
       <h2>ログイン</h2>
       <div class="form-group">
         <label for="emailInput">メールアドレス</label>
-        <input type="email" id="emailInput" autocomplete="username" class="halfwidth" />
+        <input type="email" id="emailInput" class="halfwidth" />
       </div>
       <div class="form-group">
         <label for="passwordInput">パスワード</label>
-        <input type="password" id="passwordInput" autocomplete="current-password" class="halfwidth" />
+        <input type="password" id="passwordInput" class="halfwidth" />
       </div>
       <div class="form-actions">
         <button id="loginButton">ログイン</button>
         <button id="guestButton" class="secondary">ゲストログイン</button>
-        <button id="goToRegisterButton" class="secondary">新規登録</button>
       </div>
       <p class="status" id="authStatus"></p>
     </section>
 
-    <!-- 新規登録画面 -->
-    <section id="registerView" class="view hidden">
-      <h2>新規登録</h2>
-      <div class="form-group">
-        <label for="regEmailInput">メールアドレス</label>
-        <input type="email" id="regEmailInput" autocomplete="username" class="halfwidth" />
-      </div>
-      <div class="form-group">
-        <label for="regPasswordInput">パスワード</label>
-        <input type="password" id="regPasswordInput" autocomplete="new-password" class="halfwidth" />
-      </div>
-      <div class="form-group">
-        <label for="regConfirmInput">パスワード（確認）</label>
-        <input type="password" id="regConfirmInput" autocomplete="new-password" class="halfwidth" />
-      </div>
-      <div class="form-actions">
-        <button id="registerSubmitButton">登録</button>
-        <button id="cancelRegisterButton" class="secondary">キャンセル</button>
-      </div>
-      <p class="status" id="registerStatus"></p>
-    </section>
-
-    <!-- メニュー画面 -->
+    <!-- メニュー -->
     <section id="menuView" class="view hidden">
       <h2>メニュー</h2>
-      <div class="form-actions">
-        <button id="menuAddCaseButton">案件追加</button>
-        <button id="menuSearchCaseButton">案件検索</button>
-      </div>
+      <button id="menuAddCaseButton">案件追加</button>
+      <button id="menuSearchCaseButton">案件一覧</button>
     </section>
 
     <!-- 案件追加：バーコード入力スタート画面 -->
