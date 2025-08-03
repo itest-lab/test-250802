@@ -1,4 +1,6 @@
-// Firebase の初期化設定（compat 版 SDK を利用）
+// —————————————
+// Firebase 初期化（ここで一度だけ読み込む）
+// —————————————
 firebase.initializeApp({
   apiKey: "AIzaSyArSM1XI5MLkZDiDdzkLJxBwvjM4xGWS70",
   authDomain: "test-250724.firebaseapp.com",
@@ -12,151 +14,116 @@ firebase.initializeApp({
 const auth = firebase.auth();
 const db   = firebase.firestore();
 
-// 管理者 UID リスト（Firestore ルールと一致させてください）
+// —————————————
+// 設定
+// —————————————
 const ADMIN_UIDS = [
   "KXwhR1EgWGQS0ObjI4VDouVqkgC2",
   "V2yHq9bGjIMZFz93f9XnutOBohC2"
 ];
-
-// 自動ログアウト用タイマーID
 let inactivityTimer;
 
-/**
- * 全角文字を半角に変換するユーティリティ
- */
+// —————————————
+// 半角変換ユーティリティ
+// —————————————
 function toHalfWidth(str) {
   return str.replace(/[！-～]/g, ch =>
     String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
   ).replace(/　/g, " ");
 }
 
-/**
- * ZLIB64 形式の文字列をデコードし、配列または文字列配列を返す
- */
-function decodeZlib64(input) {
-  if (!input.startsWith("ZLIB64:")) {
-    // プレフィクスがない場合はそのまま文字列を配列に
-    return [input];
-  }
-  try {
-    const base64 = input.slice("ZLIB64:".length);
-    const binary = atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    // pako で zlib 展開
-    const inflated = pako.inflate(bytes);
-    const decoded = new TextDecoder("utf-8").decode(inflated);
-    // JSON 配列としてパースできればそれを返し、できなければ改行で分割
-    try {
-      return JSON.parse(decoded);
-    } catch {
-      return decoded.split(/\r?\n/);
-    }
-  } catch (e) {
-    console.error("ZLIB64 デコードエラー:", e);
-    return null;
-  }
-}
-
-/**
- * 画面（section.view）の表示切り替え
- */
+// —————————————
+// 画面切り替え
+// —————————————
 function showView(id) {
-  document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
+  console.log("画面切り替え:", id);
+  document.querySelectorAll(".view").forEach(sec => sec.classList.add("hidden"));
   document.getElementById(id).classList.remove("hidden");
 }
 
-/**
- * 自動ログアウトタイマーをリセット（30分）および再設定
- */
+// —————————————
+// タイマー管理（30分でログアウト）
+// —————————————
 function resetInactivityTimer() {
   clearTimeout(inactivityTimer);
-  inactivityTimer = setTimeout(performLogout, 30 * 60 * 1000); // 30分
+  inactivityTimer = setTimeout(performLogout, 30 * 60 * 1000);
 }
 
-/**
- * ログアウト処理：フォームクリア＋Firebase サインアウト＋ログイン画面へ
- */
+// —————————————
+// ログアウト処理
+// —————————————
 async function performLogout() {
-  // メール／パスワード入力欄クリア
-  ["emailInput", "passwordInput", "regEmailInput", "regPasswordInput", "regConfirmInput"]
-    .forEach(id => document.getElementById(id)?.value = "");
+  console.log("自動ログアウトまたは手動ログアウト実行");
+  // 入力クリア
+  ["emailInput","passwordInput"].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = "";
+  });
   try {
     await auth.signOut();
-  } catch (e) {
-    console.error("サインアウトエラー:", e);
+  } catch(e) {
+    console.error("signOut error:", e);
   }
   showView("loginView");
 }
 
-/**
- * 初期化：イベント登録、認証状態監視、タイマー設定
- */
+// —————————————
+// 初期化
+// —————————————
 function init() {
-  // 無操作検知
+  console.log("初期化開始");
   document.addEventListener("click", resetInactivityTimer);
   document.addEventListener("keydown", resetInactivityTimer);
   resetInactivityTimer();
 
-  // ログイン実行
+  // ログイン
   document.getElementById("loginButton").addEventListener("click", async () => {
+    console.log("ログインボタンクリック");
     const email = toHalfWidth(document.getElementById("emailInput").value.trim());
     const pwd   = toHalfWidth(document.getElementById("passwordInput").value.trim());
+    console.log("入力値:", email, pwd);
     try {
       await auth.signInWithEmailAndPassword(email, pwd);
+      console.log("signInWithEmailAndPassword 成功");
       document.getElementById("authStatus").textContent = "";
     } catch (e) {
-      document.getElementById("authStatus").textContent = "ログイン失敗: " + e.message;
+      console.error("signIn error:", e);
+      document.getElementById("authStatus").textContent = "ログインに失敗しました: " + e.message;
     }
   });
 
   // ゲストログイン
   document.getElementById("guestButton").addEventListener("click", async () => {
+    console.log("ゲストログイン試行");
     try {
       await auth.signInAnonymously();
-      document.getElementById("authStatus").textContent = "";
+      document.getElementById("authStatus").textContent = "ゲストログイン成功";
     } catch (e) {
+      console.error("匿名ログインエラー:", e);
       document.getElementById("authStatus").textContent = "ゲストログイン失敗: " + e.message;
     }
   });
 
-  // 新規登録画面へ遷移
-  document.getElementById("goToRegisterButton").addEventListener("click", () => {
-    showView("registerView");
-  });
-  // 新規登録キャンセル
-  document.getElementById("cancelRegisterButton").addEventListener("click", () => {
-    showView("loginView");
-  });
-  // 新規登録実行
-  document.getElementById("registerSubmitButton").addEventListener("click", async () => {
-    const email = toHalfWidth(document.getElementById("regEmailInput").value.trim());
-    const pwd   = toHalfWidth(document.getElementById("regPasswordInput").value.trim());
-    const conf  = toHalfWidth(document.getElementById("regConfirmInput").value.trim());
-    if (pwd !== conf) {
-      document.getElementById("registerStatus").textContent = "パスワードが一致しません";
-      return;
-    }
-    try {
-      await auth.createUserWithEmailAndPassword(email, pwd);
-      document.getElementById("registerStatus").textContent = "登録完了！";
+  // 認証状態変化
+  auth.onAuthStateChanged((user) => {
+    console.log("Auth State Changed:", user);
+    if (user) {
       showView("menuView");
-    } catch (e) {
-      document.getElementById("registerStatus").textContent = "登録失敗: " + e.message;
+      document.getElementById("globalLogoutButton").classList.remove("hidden");
+    } else {
+      showView("loginView");
+      document.getElementById("globalLogoutButton").classList.add("hidden");
     }
   });
 
-  // メニュー操作：案件追加
+  // メニュー：案件追加
   document.getElementById("menuAddCaseButton").addEventListener("click", () => {
     showView("addCaseStartView");
   });
-  // メニュー操作：案件検索
+
+  // メニュー：案件一覧
   document.getElementById("menuSearchCaseButton").addEventListener("click", () => {
     showView("listView");
-    loadCasesList();
   });
 
   // グローバルログアウト
@@ -229,6 +196,11 @@ function init() {
     }
   });
 }
+
+// —————————————
+// ページ読み込み完了後に init を呼び出す
+// —————————————
+window.addEventListener("DOMContentLoaded", init);
 
 /**
  * ZLIB64 データを復元し、案件情報入力へ遷移
