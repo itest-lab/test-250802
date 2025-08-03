@@ -94,7 +94,14 @@ async function performLogout() {
  */
 function decodeZlib64(str) {
   try {
-    const binaryStr = atob(str);
+    // 一部のバーコードには "ZLIB64:" というプレフィックスが付与されているため、これを取り除く
+    let base64 = str;
+    if (typeof base64 === "string" && base64.startsWith("ZLIB64:")) {
+      base64 = base64.substring(7);
+    }
+    // 空白や改行など不正な文字が含まれている場合は削除する
+    base64 = base64.replace(/\s/g, "");
+    const binaryStr = atob(base64);
     const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
     const decompressed = pako.inflate(bytes);
     const dec = new TextDecoder();
@@ -111,6 +118,8 @@ function decodeZlib64(str) {
  * @param {string} code ZLIB64 エンコードされたバーコード
  */
 function processStartCode(code) {
+  // 新規登録の準備として各入力欄を初期化
+  resetAddCaseForms();
   const arr = decodeZlib64(code);
   if (!Array.isArray(arr) || arr.length < 3) {
     alert("バーコード解析に失敗しました");
@@ -122,6 +131,8 @@ function processStartCode(code) {
   document.getElementById("productInput").value     = product;
   showView("shipmentsView");
   populateCaseSummary();
+  // 発送情報テーブルを初期化（10 行）
+  initShipmentsTable();
 }
 
 // —————————————
@@ -156,16 +167,39 @@ function addShipmentsRows(count) {
     const tdTrack = document.createElement("td");
     const inp = document.createElement("input");
     inp.type = "text";
-    tdTrack.appendChild(inp);
-    const tdCam = document.createElement("td");
-    tdCam.classList.add("camera-col");
-    const btn = document.createElement("button");
-    btn.textContent = "";
-    btn.addEventListener("click", () => {
-      // TODO: QR リーダ起動 → processStartCode(decoded)
+    // Enter キーで次の追跡番号入力へ移動する
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const currentRow = e.target.closest('tr');
+        if (currentRow) {
+          const nextRow = currentRow.nextElementSibling;
+          if (nextRow) {
+            const nextInputCell = nextRow.children[2];
+            if (nextInputCell) {
+              const nextInput = nextInputCell.querySelector('input');
+              if (nextInput) nextInput.focus();
+            }
+          }
+        }
+      }
     });
-    tdCam.appendChild(btn);
-    tr.append(tdIdx, tdCo, tdTrack, tdCam);
+    tdTrack.appendChild(inp);
+    // PC ではカメラ列を表示しないため、画面幅に応じてカメラ列を追加
+    const isPC = window.matchMedia('(min-width: 768px)').matches;
+    if (!isPC) {
+      const tdCam = document.createElement('td');
+      tdCam.classList.add('camera-col');
+      const btn = document.createElement('button');
+      btn.textContent = '';
+      btn.addEventListener('click', () => {
+        // TODO: QR リーダ起動 → processStartCode(decoded)
+      });
+      tdCam.appendChild(btn);
+      tr.append(tdIdx, tdCo, tdTrack, tdCam);
+    } else {
+      tr.append(tdIdx, tdCo, tdTrack);
+    }
     tbody.appendChild(tr);
   }
 }
@@ -175,17 +209,56 @@ function addShipmentsRows(count) {
 // —————————————
 async function saveCase() {
   const tbody = document.getElementById("shipmentsBody");
+  const statusEl = document.getElementById("shipmentsStatus");
+  if (statusEl) statusEl.textContent = "";
+  // エラー表示をリセット
+  document.querySelectorAll('#shipmentsBody tr').forEach(row => row.classList.remove('error'));
+  const shipments = [];
+  let hasError = false;
   for (const row of tbody.children) {
     const co = row.children[1].firstChild.value;
     const tn = row.children[2].firstChild.value.trim();
-    if (tn && !co) {
-      alert("追跡番号が入力されています。運送会社を選択してください。");
-      return;
+    // 追跡番号が入力されている場合は shipments に追加。未入力の場合は無視。
+    if (tn) {
+      // 運送会社が未選択の場合はエラー
+      if (!co) {
+        row.classList.add('error');
+        hasError = true;
+      }
+      shipments.push({ carrier: co, trackingNumber: tn });
     }
   }
-  // Firestore 登録例:
-  // await db.collection("cases").add({ orderNumber: ..., createdAt: firebase.firestore.FieldValue.serverTimestamp(), ... });
-  // loadCasesList();
+  if (hasError) {
+    if (statusEl) statusEl.textContent = "追跡番号が入力されている行で運送会社を選択してください。";
+    return;
+  }
+  // 案件情報を取得
+  const orderNumber = toHalfWidth(document.getElementById('orderNumberInput').value.trim());
+  const customer    = toHalfWidth(document.getElementById('customerInput').value.trim());
+  const product     = toHalfWidth(document.getElementById('productInput').value.trim());
+  // 必須チェック
+  if (!orderNumber || !customer || !product) {
+    if (statusEl) statusEl.textContent = '受注番号・得意先・品名を全て入力してください。';
+    return;
+  }
+  try {
+    await db.collection('cases').add({
+      orderNumber,
+      customer,
+      product,
+      shipments,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: auth.currentUser ? auth.currentUser.uid : null
+    });
+    alert('登録しました');
+    // フォームを初期化し、メニューに戻る
+    resetAddCaseForms();
+    showView('menuView');
+    // 一覧を更新
+    loadCasesList();
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '登録に失敗しました: ' + e.message;
+  }
 }
 
 // —————————————
@@ -228,6 +301,14 @@ function renderCasesList(list) {
     const label = document.createElement("span");
     label.textContent = "全選択";
     selectAllDiv.append(selectAllCb, label);
+    // 一括削除ボタンを追加
+    const delSelected = document.createElement("button");
+    delSelected.textContent = "選択削除";
+    delSelected.addEventListener("click", e => {
+      e.stopPropagation();
+      deleteSelectedCases();
+    });
+    selectAllDiv.appendChild(delSelected);
     listElem.appendChild(selectAllDiv);
   }
   list.forEach(item => {
@@ -303,8 +384,19 @@ async function showCaseDetails(caseId) {
     }
     const data = docSnap.data();
     currentCaseId = caseId;
-    document.getElementById("detailsInfo").textContent =
-      `受注番号: ${data.orderNumber || ""}\n得意先: ${data.customer || ""}\n品名: ${data.product || ""}`;
+    // 詳細情報を縦並びで表示
+    const detailsDiv = document.getElementById('detailsInfo');
+    detailsDiv.innerHTML = '';
+    const infoItems = [
+      { label: '受注番号', value: data.orderNumber || '' },
+      { label: '得意先', value: data.customer || '' },
+      { label: '品名', value: data.product || '' }
+    ];
+    infoItems.forEach(item => {
+      const p = document.createElement('p');
+      p.textContent = `${item.label}: ${item.value}`;
+      detailsDiv.appendChild(p);
+    });
     const shipmentsDiv = document.getElementById("shipmentsList");
     shipmentsDiv.innerHTML = "";
     if (data.shipments && Array.isArray(data.shipments)) {
@@ -332,6 +424,71 @@ async function deleteCurrentCase(caseId) {
     loadCasesList();
   } catch (e) {
     alert("削除失敗: " + e.message);
+  }
+}
+
+// —————————————
+// 選択された案件の一括削除（管理者のみ）
+// —————————————
+async function deleteSelectedCases() {
+  // 現在一覧に表示されている案件から選択されているものを収集
+  const checkboxes = Array.from(document.querySelectorAll('.case-select'));
+  const targetIds = checkboxes
+    .filter(cb => cb.dataset.caseId && cb.checked)
+    .map(cb => cb.dataset.caseId);
+  if (targetIds.length === 0) {
+    alert("削除する案件を選択してください");
+    return;
+  }
+  if (!confirm(`選択された ${targetIds.length} 件の案件を削除しますか？`)) {
+    return;
+  }
+  try {
+    for (const id of targetIds) {
+      await db.collection("cases").doc(id).delete();
+    }
+    alert("削除しました");
+    loadCasesList();
+  } catch (e) {
+    alert("一括削除に失敗しました: " + e.message);
+  }
+}
+
+// —————————————
+// 案件追加フォーム（バーコード→案件入力→発送情報）を初期状態にする
+// —————————————
+function resetAddCaseForms() {
+  // スタート画面
+  const barcodeInput = document.getElementById('barcodeInput');
+  if (barcodeInput) barcodeInput.value = '';
+  const startStatus = document.getElementById('startStatus');
+  if (startStatus) startStatus.textContent = '';
+  // 案件情報入力
+  ['orderNumberInput','customerInput','productInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const caseStatus = document.getElementById('caseStatus');
+  if (caseStatus) caseStatus.textContent = '';
+  // 発送情報入力
+  const shipmentsBody = document.getElementById('shipmentsBody');
+  if (shipmentsBody) shipmentsBody.innerHTML = '';
+  const carrierAll = document.getElementById('carrierAllSelect');
+  if (carrierAll) carrierAll.value = '';
+  const shipmentsStatus = document.getElementById('shipmentsStatus');
+  if (shipmentsStatus) shipmentsStatus.textContent = '';
+  const caseSummary = document.getElementById('caseSummary');
+  if (caseSummary) caseSummary.textContent = '';
+}
+
+// —————————————
+// 発送情報テーブルを初期化（未行の場合 10 行を生成）
+// —————————————
+function initShipmentsTable() {
+  const body = document.getElementById('shipmentsBody');
+  if (!body) return;
+  if (body.children.length === 0) {
+    addShipmentsRows(10);
   }
 }
 
@@ -422,6 +579,8 @@ function init() {
 
   // メニュー：案件追加
   document.getElementById("menuAddCaseButton").addEventListener("click", () => {
+    // 新規案件追加時には各入力欄を初期化
+    resetAddCaseForms();
     showView("addCaseStartView");
   });
 
@@ -436,6 +595,8 @@ function init() {
 
   // 案件追加：手動入力モード切替（スタート画面から）
   document.getElementById("manualInputButton").addEventListener("click", () => {
+    // 新規入力のためフォームを初期化
+    resetAddCaseForms();
     showView("caseInputView");
     document.getElementById("orderNumberInput").focus();
     // 手動入力に切り替える際は 2 次元バーコード領域を隠し、ボタンの文言を更新
@@ -469,8 +630,10 @@ function init() {
 
   // 案件情報：次へ
   document.getElementById("caseNextButton").addEventListener("click", () => {
+    // 発送情報入力画面を表示し、サマリーと初期行を設定
     showView("shipmentsView");
     populateCaseSummary();
+    initShipmentsTable();
   });
 
   // 案件情報：戻る
@@ -484,9 +647,23 @@ function init() {
   // 発送情報：登録
   document.getElementById("saveCaseButton").addEventListener("click", saveCase);
 
+  // 発送情報：全体運送会社変更
+  document.getElementById('carrierAllSelect').addEventListener('change', e => {
+    const value = e.target.value;
+    // すべての個別運送会社セレクトに値を反映
+    document.querySelectorAll('#shipmentsBody select').forEach(sel => {
+      sel.value = value;
+    });
+  });
+
   // 発送情報：戻る（案件情報入力へ）
-  document.getElementById("backToMenuFromShipmentsButton").addEventListener("click", () => {
+  document.getElementById("backToCaseButton").addEventListener("click", () => {
+    // 案件情報入力画面に戻る
     showView("caseInputView");
+  });
+  // 発送情報：メニューへ戻る
+  document.getElementById("backToMenuFromShipmentsButton").addEventListener("click", () => {
+    showView("menuView");
   });
 
   // 案件一覧：更新

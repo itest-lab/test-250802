@@ -160,6 +160,16 @@ button:disabled {
   word-break: break-word;
 }
 
+/* 入力エラー行の強調表示 */
+#shipmentsBody tr.error {
+  background-color: #ffeaea;
+}
+#shipmentsBody tr.error input,
+#shipmentsBody tr.error select {
+  border-color: #e53935;
+  background-color: #fff5f5;
+}
+
 /* PC画面ではスマホ専用機能（バーコードカメラ等）を非表示にする */
 @media (min-width: 768px) {
   #scan2dContainer,
