@@ -36,6 +36,11 @@ let inactivityTimer;
 let casesCache = [];
 let currentCaseId = null;
 
+// 詳細画面で表示中の案件データ（発送情報再取得や編集用）
+let detailsCaseData = null;
+// 発送情報追加用に既存案件を編集している場合の ID
+let editingCaseId = null;
+
 // —————————————
 // QR/バーコードスキャナー用のグローバル変数
 // 2D スキャン用（案件情報の開始コードやスタート画面）と 1D スキャン用（追跡番号）
@@ -176,6 +181,11 @@ function addShipmentsRows(count) {
     const tdTrack = document.createElement("td");
     const inp = document.createElement("input");
     inp.type = "text";
+    // 自動補完・予測変換を無効にする
+    inp.autocomplete = 'off';
+    inp.autocorrect = 'off';
+    inp.autocapitalize = 'off';
+    inp.spellcheck = false;
     // Enter キーで次の追跡番号入力へ移動する
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
@@ -212,6 +222,39 @@ function addShipmentsRows(count) {
     }
     tbody.appendChild(tr);
   }
+}
+
+/**
+ * 案件詳細画面から追加発送情報を入力するための準備を行う。
+ * 現在表示中の案件データを保存し、案件情報の入力欄に既存値をセットした上で
+ * 発送情報入力画面へ遷移する。既存の発送情報は編集せず、新たに追加するため
+ * 指定行数の空行のみを生成する。
+ *
+ * @param {number} extraRows 追加する空の行数
+ */
+function startAddShipmentsFromDetails(extraRows) {
+  // 現在詳細画面に表示されている案件がなければ処理しない
+  if (!currentCaseId || !detailsCaseData) return;
+  editingCaseId = currentCaseId;
+  // 案件基本情報を案件入力欄にセット
+  document.getElementById('orderNumberInput').value = detailsCaseData.orderNumber || '';
+  document.getElementById('customerInput').value    = detailsCaseData.customer || '';
+  document.getElementById('productInput').value     = detailsCaseData.product || '';
+  // 発送情報入力画面に切り替え
+  showView('shipmentsView');
+  populateCaseSummary();
+  // テーブルを空にして指定行数追加
+  const tbody = document.getElementById('shipmentsBody');
+  if (tbody) {
+    tbody.innerHTML = '';
+    addShipmentsRows(extraRows);
+  }
+  // 全体運送会社をクリア
+  const carrierAll = document.getElementById('carrierAllSelect');
+  if (carrierAll) carrierAll.value = '';
+  // ステータス表示をリセット
+  const shipmentsStatus = document.getElementById('shipmentsStatus');
+  if (shipmentsStatus) shipmentsStatus.textContent = '';
 }
 
 // —————————————
@@ -252,20 +295,45 @@ async function saveCase() {
     return;
   }
   try {
-    await db.collection('cases').add({
-      orderNumber,
-      customer,
-      product,
-      shipments,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      createdBy: auth.currentUser ? auth.currentUser.uid : null
-    });
-    alert('登録しました');
-    // フォームを初期化し、メニューに戻る
-    resetAddCaseForms();
-    showView('menuView');
-    // 一覧を更新
-    loadCasesList();
+    if (editingCaseId) {
+      // 既存案件に発送情報を追加する
+      const docRef = db.collection('cases').doc(editingCaseId);
+      const docSnap = await docRef.get();
+      const existingData = docSnap.exists ? docSnap.data() : null;
+      const existingShipments = existingData && Array.isArray(existingData.shipments) ? existingData.shipments : [];
+      // 既存発送情報に新規発送情報を追加
+      const newShipments = existingShipments.concat(shipments);
+      // 更新するフィールドを構築（基本情報も更新しておく）
+      await docRef.update({
+        orderNumber,
+        customer,
+        product,
+        shipments: newShipments,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      alert('発送情報を追加しました');
+      // 編集モードを解除
+      editingCaseId = null;
+      detailsCaseData = null;
+      // 詳細ページを再表示してステータス取得
+      showCaseDetails(docRef.id);
+    } else {
+      // 新規登録
+      await db.collection('cases').add({
+        orderNumber,
+        customer,
+        product,
+        shipments,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdBy: auth.currentUser ? auth.currentUser.uid : null
+      });
+      alert('登録しました');
+      // フォームを初期化し、メニューに戻る
+      resetAddCaseForms();
+      showView('menuView');
+      // 一覧を更新
+      loadCasesList();
+    }
   } catch (e) {
     if (statusEl) statusEl.textContent = '登録に失敗しました: ' + e.message;
   }
@@ -393,6 +461,8 @@ async function showCaseDetails(caseId) {
       return;
     }
     const data = docSnap.data();
+    // グローバルに保存しておくことで発送情報追加時に利用
+    detailsCaseData = data;
     currentCaseId = caseId;
     // 詳細情報を縦並びで表示
     const detailsDiv = document.getElementById('detailsInfo');
@@ -412,11 +482,17 @@ async function showCaseDetails(caseId) {
     // 発送情報があれば、追跡APIからステータスと時刻を取得して表示する
     if (data.shipments && Array.isArray(data.shipments)) {
       const carrierUrls = {
-        yamato: "https://track.kuronekoyamato.co.jp/ytc/searchItem?number=",
-        sagawa: "https://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijosearch.do?okurijoNo=",
+        // ヤマト運輸
+        yamato: "https://jizen.kuronekoyamato.co.jp/jizen/servlet/crjz.b.NQ0010?id=",
+        // 佐川急便
+        sagawa: "https://k2k.sagawa-exp.co.jp/p/web/okurijosearch.do?okurijoNo=",
+        // 西濃運輸（公式サイトでの直接入力フォームが見つからないため旧URLのままとする）
         seino:  "https://track.seino.co.jp/kamotsu/GempyoSndChnTrack?rno=",
+        // トナミ運輸
         tonami: "https://toi.tonami.co.jp/tonami/TrackingServlet?wght_no1=",
+        // 福山通運
         fukutsu:"https://corp.fukutsu.co.jp/apps/parcel-search/search/index?number=",
+        // 飛騨運輸（公式URL不明のため空文字）
         hida:   ""
       };
       const statusPromises = data.shipments.map(async (ship, idx) => {
@@ -649,6 +725,10 @@ function start1dScanForInput(inputElem) {
 // —————————————
 function init() {
   console.log("初期化開始");
+  // ページ読み込み時は常にログアウト状態から開始する（30分の自動ログアウトは別途実施）
+  auth.signOut().catch(e => {
+    console.warn('signOut on init failed:', e);
+  });
   document.addEventListener("click", resetInactivityTimer);
   document.addEventListener("keydown", resetInactivityTimer);
   resetInactivityTimer();
@@ -830,8 +910,11 @@ function init() {
     showView("menuView");
   });
 
-  // 詳細画面：5件追加（発送情報追加機能は将来的に拡張予定）
-  document.getElementById("addMoreShipmentsDetailsButton").addEventListener("click", () => addShipmentsRows(5));
+  // 詳細画面：5件追加
+  document.getElementById("addMoreShipmentsDetailsButton").addEventListener("click", () => {
+    // 詳細画面から発送情報追加フォームを開く
+    startAddShipmentsFromDetails(5);
+  });
 
   // 詳細画面：削除（管理者のみ）
   document.getElementById("deleteCaseButton").addEventListener("click", () => {

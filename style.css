@@ -160,6 +160,19 @@ button:disabled {
   word-break: break-word;
 }
 
+/* 発送情報一覧の各行をボタン風に表示 */
+#shipmentsList p {
+  background-color: #f7f7f7;
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#shipmentsList p:hover {
+  background-color: #e6f2ff;
+}
+
 /* 入力エラー行の強調表示 */
 #shipmentsBody tr.error {
   background-color: #ffeaea;
