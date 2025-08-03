@@ -37,6 +37,15 @@ let casesCache = [];
 let currentCaseId = null;
 
 // —————————————
+// QR/バーコードスキャナー用のグローバル変数
+// 2D スキャン用（案件情報の開始コードやスタート画面）と 1D スキャン用（追跡番号）
+let qrReader2d = null;
+let qrReaderStart = null;
+let qrReader1d = null;
+// 現在スキャン対象となっている追跡番号入力欄
+let currentBarcodeInput = null;
+
+// —————————————
 // 半角変換ユーティリティ
 // —————————————
 function toHalfWidth(str) {
@@ -193,7 +202,8 @@ function addShipmentsRows(count) {
       const btn = document.createElement('button');
       btn.textContent = '';
       btn.addEventListener('click', () => {
-        // TODO: QR リーダ起動 → processStartCode(decoded)
+        // スマホではバーコードスキャンを開始し、読み取った値をこの行の追跡番号欄に設定
+        start1dScanForInput(inp);
       });
       tdCam.appendChild(btn);
       tr.append(tdIdx, tdCo, tdTrack, tdCam);
@@ -399,12 +409,62 @@ async function showCaseDetails(caseId) {
     });
     const shipmentsDiv = document.getElementById("shipmentsList");
     shipmentsDiv.innerHTML = "";
+    // 発送情報があれば、追跡APIからステータスと時刻を取得して表示する
     if (data.shipments && Array.isArray(data.shipments)) {
-      data.shipments.forEach((ship, idx) => {
-        const p = document.createElement("p");
-        p.textContent = `${idx+1}. 運送会社: ${translateCarrier(ship.carrier)}, 追跡番号: ${ship.trackingNumber || ""}`;
+      const carrierUrls = {
+        yamato: "https://track.kuronekoyamato.co.jp/ytc/searchItem?number=",
+        sagawa: "https://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijosearch.do?okurijoNo=",
+        seino:  "https://track.seino.co.jp/kamotsu/GempyoSndChnTrack?rno=",
+        tonami: "https://toi.tonami.co.jp/tonami/TrackingServlet?wght_no1=",
+        fukutsu:"https://corp.fukutsu.co.jp/apps/parcel-search/search/index?number=",
+        hida:   ""
+      };
+      const statusPromises = data.shipments.map(async (ship, idx) => {
+        const carrier = ship.carrier;
+        const tracking = ship.trackingNumber || "";
+        let status = "-";
+        let time = "";
+        // API 呼び出し
+        if (carrier && tracking) {
+          try {
+            const response = await fetch(`https://track-api.hr46-ksg.workers.dev/?carrier=${carrier}&tracking=${tracking}`);
+            if (response.ok) {
+              const json = await response.json();
+              // 応答が配列の場合も考慮
+              if (json && (json.status || (json.data && json.data.status))) {
+                status = json.status || (json.data && json.data.status) || status;
+                time = json.time || (json.data && json.data.time) || time;
+              }
+            }
+          } catch (e) {
+            console.warn('tracking api error', e);
+          }
+        }
+        const p = document.createElement('p');
+        p.textContent = `${idx+1}. ${translateCarrier(carrier)}, ${tracking}：${status}${time ? ` (${time})` : ''}`;
+        // クリックで各運送会社の追跡サイトを開く
+        p.style.cursor = 'pointer';
+        p.addEventListener('click', () => {
+          const urlBase = carrierUrls[carrier] || '';
+          if (urlBase) {
+            const url = urlBase + encodeURIComponent(tracking);
+            window.open(url, '_blank');
+          }
+        });
         shipmentsDiv.appendChild(p);
       });
+      await Promise.all(statusPromises);
+    }
+    // 一般ユーザーでは案件削除ボタンを表示しない
+    const user = auth.currentUser;
+    const isAdminUser = user && ADMIN_UIDS.includes(user.uid);
+    const delBtn = document.getElementById('deleteCaseButton');
+    if (delBtn) {
+      if (isAdminUser) {
+        delBtn.classList.remove('hidden');
+      } else {
+        delBtn.classList.add('hidden');
+      }
     }
     showView("detailsView");
   } catch (e) {
@@ -507,6 +567,84 @@ function translateCarrier(code) {
 }
 
 // —————————————
+// QR/バーコードスキャン制御
+// —————————————
+/**
+ * 2次元バーコード (ZLIB64 対応) を読み取り、新規案件として処理する。
+ */
+function start2dScan(containerId) {
+  const scanContainer = document.getElementById(containerId);
+  if (!scanContainer) return;
+  scanContainer.classList.remove('hidden');
+  // 既存のリーダを停止して破棄
+  if (qrReader2d) {
+    try { qrReader2d.stop(); } catch (e) {}
+    qrReader2d = null;
+  }
+  // id は containerId と同じ要素にする
+  qrReader2d = new Html5Qrcode(containerId);
+  qrReader2d.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: 250 },
+    (decodedText, decodedResult) => {
+      // 読み取り成功時
+      const text = toHalfWidth(decodedText.trim());
+      // スタートビューの読み取りの場合は barcodeInput に入力
+      if (containerId === 'startQrReader') {
+        const barcodeInput = document.getElementById('barcodeInput');
+        if (barcodeInput) barcodeInput.value = text;
+      }
+      // ZLIB64 処理
+      processStartCode(text);
+      qrReader2d.stop().then(() => {
+        scanContainer.classList.add('hidden');
+        qrReader2d = null;
+      });
+    },
+    (errorMessage) => {
+      // 読み取り失敗時は何もしない
+    }
+  );
+}
+
+/**
+ * 1次元バーコード (追跡番号) を読み取り、指定された入力欄に結果を格納する。
+ * @param {HTMLInputElement} inputElem
+ */
+function start1dScanForInput(inputElem) {
+  const barcodeContainer = document.getElementById('barcodeReader');
+  if (!barcodeContainer) return;
+  // 既にスキャン中であれば無視
+  if (currentBarcodeInput) return;
+  currentBarcodeInput = inputElem;
+  barcodeContainer.classList.remove('hidden');
+  // 停止済みでなければ停止
+  if (qrReader1d) {
+    try { qrReader1d.stop(); } catch (e) {}
+    qrReader1d = null;
+  }
+  qrReader1d = new Html5Qrcode('barcodeReader');
+  qrReader1d.start(
+    { facingMode: 'environment' },
+    { fps: 10 },
+    (decodedText, decodedResult) => {
+      const text = toHalfWidth(decodedText.trim());
+      if (currentBarcodeInput) {
+        currentBarcodeInput.value = text;
+      }
+      qrReader1d.stop().then(() => {
+        barcodeContainer.classList.add('hidden');
+        qrReader1d = null;
+        currentBarcodeInput = null;
+      });
+    },
+    (error) => {
+      // 読み取りエラーは無視
+    }
+  );
+}
+
+// —————————————
 // 初期化
 // —————————————
 function init() {
@@ -604,7 +742,13 @@ function init() {
     if (scanContainer) {
       scanContainer.classList.add("hidden");
     }
-    document.getElementById("switchInputModeButton").textContent = "カメラ入力に切り替え";
+    // ボタンの表示をバーコード入力に更新
+    document.getElementById("switchInputModeButton").textContent = "バーコード入力";
+  });
+
+  // スタート画面：カメラ起動で 2次元バーコードを読み取る
+  document.getElementById('barcodeCameraButton').addEventListener('click', () => {
+    start2dScan('startQrReader');
   });
 
   // バーコード入力の Enter で変換処理を実行
@@ -621,11 +765,18 @@ function init() {
     const hidden = scanContainer.classList.contains("hidden");
     if (hidden) {
       scanContainer.classList.remove("hidden");
+      // スキャン表示時は手動入力へ切り替えるボタンを表示
       document.getElementById("switchInputModeButton").textContent = "手動入力に切り替え";
     } else {
       scanContainer.classList.add("hidden");
-      document.getElementById("switchInputModeButton").textContent = "カメラ入力に切り替え";
+      // スキャンを閉じたらバーコード入力ボタンにする
+      document.getElementById("switchInputModeButton").textContent = "バーコード入力";
     }
+  });
+
+  // 2次元スキャンボタン
+  document.getElementById('scan2dButton').addEventListener('click', () => {
+    start2dScan('qrReader');
   });
 
   // 案件情報：次へ
