@@ -361,23 +361,17 @@ function markLoginTime() {
   localStorage.setItem('loginTime', Date.now().toString());
 }
 function isSessionExpired() {
-  const stored = localStorage.getItem('loginTime');
-  // loginTime が未設定なら期限切れ扱いにしない
-  if (!stored) return false;
-  const t = parseInt(stored, 10);
+  const t = parseInt(localStorage.getItem('loginTime') || '0', 10);
   return (Date.now() - t) > SESSION_LIMIT_MS;
 }
 
-// ページ読み込み時に、loginTime がある場合のみ期限切れチェック
-window.addEventListener('load', () => {
-  const stored = localStorage.getItem('loginTime');
-  if (stored && isSessionExpired()) {
-    auth.signOut().catch(err => {
-      console.warn("セッションタイムアウト時サインアウト失敗:", err);
-    });
-    clearLoginTime();
-  }
-});
+// ページ読み込み時にセッション期限切れならサインアウト
+if (isSessionExpired()) {
+  auth.signOut().catch(err => {
+    console.warn("セッションタイムアウト時サインアウト失敗:", err);
+  });
+  clearLoginTime();
+}
 
 function showView(id){
   document.querySelectorAll(".subview").forEach(el=>el.style.display="none");
@@ -406,69 +400,33 @@ if(loginView.style.display !== "none"){
 //  emailInput.focus();
 }
 
-// 無操作タイマー管理
-let inactivityTimer = null;
-function resetInactivityTimer() {
-  clearTimeout(inactivityTimer);
-  inactivityTimer = setTimeout(doLogout, SESSION_LIMIT_MS);
-}
-function initInactivityMonitor() {
-  resetInactivityTimer();
-  ['click','keydown','mousemove','touchstart'].forEach(evt =>
-    document.addEventListener(evt, resetInactivityTimer, { passive: true })
-  );
-}
-function clearInactivityTimer() {
-  clearTimeout(inactivityTimer);
-  inactivityTimer = null;
-}
-
-// ログアウト共通処理
-function doLogout() {
-  auth.signOut();
-}
-
 // --- 認証監視 ---
 auth.onAuthStateChanged(async user => {
-  // リロード直後のセッション期限チェック
-  if (!user && isSessionExpired()) {
-    await auth.signOut().catch(()=>{});
-    clearLoginTime();
-  }
-
   if (user) {
-    // ── ログイン時処理 ──
-    // タイムスタンプ記録
-    markLoginTime();
-    // 画面切り替え
-    loginView.style.display   = 'none';
-    signupView.style.display  = 'none';
-    mainView.style.display    = 'block';
-    showView('add-case-view');
-    // 管理者判定
     try {
-      const snap = await db.ref(`admins/${user.uid}`).once('value');
+      // Realtime DB の admins/{uid} が true なら管理者扱い
+      const snap = await db.ref(`admins/${user.uid}`).once("value");
       isAdmin = snap.val() === true;
-    } catch {
+    } catch (e) {
+      console.error("管理者判定エラー:", e);
       isAdmin = false;
     }
-    // ボタン表示更新
-    deleteSelectedBtn.style.display = isAdmin ? 'block' : 'none';
-    selectAllContainer.style.display = isAdmin ? 'block' : 'none';
-    // 無操作タイマー開始
-    initInactivityMonitor();
-    // 初期ビュー処理
-    initAddCaseView();
 
+    loginView.style.display = "none";
+    signupView.style.display = "none";
+    mainView.style.display = "block";
+    showView("add-case-view");
+    initAddCaseView();
+    startSessionTimer();
+    // 管理者の場合は一括削除ボタンの表示を更新
+    deleteSelectedBtn.style.display = isAdmin ? "block" : "none";
   } else {
-    // ── ログアウト時処理 ──
+    // ログアウト時
     isAdmin = false;
-    clearInactivityTimer();
+    loginView.style.display = "block";
+    signupView.style.display = "none";
+    mainView.style.display = "none";
     clearLoginTime();
-    // 画面切り替え
-    mainView.style.display    = 'none';
-    signupView.style.display  = 'none';
-    loginView.style.display   = 'block';
   }
 });
 
@@ -812,7 +770,7 @@ startScanBtn.onclick = () => {
 };
 manualConfirmBtn.onclick = () => {
   if(!manualOrderIdInput.value || !manualCustomerInput.value || !manualTitleInput.value){
-    alert("すべての項目を入力してください");
+    alert("必須項目を入力");
     return;
   }
   detailOrderId.textContent  = manualOrderIdInput.value.trim();
