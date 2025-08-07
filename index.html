@@ -12,9 +12,9 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
   <!-- ZLIB 展開用 pako -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-  <!-- ２次元コード読み取り（カメラ機能コメント化中） -->
+  <!-- ２次元コード読み取りライブラリ -->
   <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
-  <!-- １次元バーコード読み取り（カメラ機能コメント化中） -->
+  <!-- １次元バーコード読み取りライブラリ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 </head>
 <body>
@@ -26,13 +26,25 @@
   <!-- ログインビュー -->
   <div id="login-view">
     <h2>ログイン</h2>
-    <input id="email"    type="text"     placeholder="メール or ID">
+    <input id="email"    type="text"     placeholder="メールアドレス">
     <input id="password" type="password" placeholder="パスワード">
     <button id="login-btn">ログイン</button>
     <button id="signup-btn">新規登録</button>
     <button id="guest-btn">ゲストログイン</button>
     <button id="reset-btn">パスワード再発行</button>
+    <div id="login-status-container" style="margin-top: 1rem; color: #333;"></div>
     <p id="login-error" class="error"></p>
+  </div>
+
+  <!-- 新規登録ビュー -->
+  <div id="signup-view" style="display:none;">
+    <h2>新規登録</h2>
+    <input id="signup-email" type="text" placeholder="メールアドレス">
+    <input id="signup-password" type="password" placeholder="パスワード">
+    <input id="signup-confirm-password" type="password" placeholder="パスワード(確認)">
+    <button id="signup-confirm-btn">登録</button>
+    <button id="back-to-login-btn">戻る</button>
+    <p id="signup-error" class="error"></p>
   </div>
 
   <!-- メインビュー -->
@@ -54,8 +66,8 @@
       <!-- スキャンモード -->
       <div id="scan-mode" style="display:none;">
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
-        <!-- カメラ起動ボタン（無効化中） -->
-        <button id="btnScan2D" class="small-btn" type="button">カメラ起動</button>
+        <!-- カメラ起動ボタン（スマホのみ表示） -->
+        <button id="btnScan2D" class="small-btn camera-btn" type="button">カメラ起動</button>
         <button id="start-manual-btn">手動入力へ切替</button>
       </div>
 
@@ -82,18 +94,16 @@
           </label>
           <select id="fixed-carrier-select" style="display:none;">
             <option value="">運送会社選択してください</option>
-            <option value="sagawa">佐川急便</option>
             <option value="yamato">ヤマト運輸</option>
             <option value="fukutsu">福山通運</option>
             <option value="seino">西濃運輸</option>
             <option value="tonami">トナミ運輸</option>
             <option value="hida">飛騨運輸</option>
+            <option value="sagawa">佐川急便</option>
           </select>
         </div>
 
         <div id="tracking-rows"></div>
-        <!-- カメラ起動ボタン（無効化中） -->
-        <button id="btnScan1D" class="small-btn">カメラ起動</button>
         <button id="add-tracking-row-btn">＋追跡番号行を追加</button>
 
         <button id="confirm-add-case-btn">登録</button>
@@ -112,7 +122,11 @@
       <button id="search-btn">検索</button>
       <button id="list-all-btn">一覧表示</button>
       <ul id="search-results"></ul>
-      <!-- 選択削除ボタン（管理者のみ表示） -->
+      <!-- 管理者専用: 全選択チェックボックスと選択削除ボタン -->
+      <label id="select-all-container" style="display:none;">
+        <input type="checkbox" id="select-all-checkbox">
+        表示項目を全選択
+      </label>
       <button id="delete-selected-btn" style="display:none;">選択削除</button>
     </div>
 
@@ -138,12 +152,12 @@
           </label>
           <select id="fixed-carrier-select-detail" style="display:none;">
             <option value="">運送会社選択してください</option>
-            <option value="sagawa">佐川急便</option>
             <option value="yamato">ヤマト運輸</option>
             <option value="fukutsu">福山通運</option>
             <option value="seino">西濃運輸</option>
             <option value="tonami">トナミ運輸</option>
             <option value="hida">飛騨運輸</option>
+            <option value="sagawa">佐川急便</option>
           </select>
         </div>
 
@@ -159,8 +173,10 @@
     </div>
   </div>
 
-  <video id="video2d" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:10001; object-fit:cover;"></video>
-  <video id="video1d" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:10001; object-fit:cover;"></video>
+  <!-- カメラプレビュー用ビデオ要素 -->
+  <video id="video2d" style="display:none;width:100%;height:auto;" playsinline></video>
+  <video id="video1d" style="display:none;width:100%;height:auto;" playsinline></video>
+
   <script src="main.js"></script>
 </body>
 </html>
