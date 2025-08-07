@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>案件管理システム</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Firebase SDK (Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <!-- ZLIB 展開用 pako -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+  <!-- ２次元コード読み取り（カメラ機能コメント化中） -->
+  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+  <!-- １次元バーコード読み取り（カメラ機能コメント化中） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+</head>
+<body>
+  <!-- 読み込み中オーバーレイ -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ログインビュー -->
+  <div id="login-view">
+    <h2>ログイン</h2>
+    <input id="email"    type="text"     placeholder="メール or ID">
+    <input id="password" type="password" placeholder="パスワード">
+    <button id="login-btn">ログイン</button>
+    <button id="signup-btn">新規登録</button>
+    <button id="guest-btn">ゲストログイン</button>
+    <button id="reset-btn">パスワード再発行</button>
+    <p id="login-error" class="error"></p>
+  </div>
+
+  <!-- メインビュー -->
+  <div id="main-view" style="display:none;">
+    <button id="logout-btn">ログアウト</button>
+    <nav>
+      <button id="nav-add-btn">案件追加</button>
+      <button id="nav-search-btn">案件検索</button>
+    </nav>
+
+    <!-- 案件追加ビュー -->
+    <div id="add-case-view" class="subview" style="display:none">
+      <h3>案件追加</h3>
+
+      <!-- 隠しファイル入力（カメラ機能コメント化中） -->
+      <!-- <input type="file" id="fileInput2D" accept="image/*" capture="environment" style="display:none;"> -->
+      <!-- <input type="file" id="fileInput1D" accept="image/*" capture="environment" style="display:none;"> -->
+
+      <!-- スキャンモード -->
+      <div id="scan-mode" style="display:none;">
+        <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
+        <!-- カメラ起動ボタン（無効化中） -->
+        <button id="btnScan2D" class="small-btn" type="button">カメラ起動</button>
+        <button id="start-manual-btn">手動入力へ切替</button>
+      </div>
+
+      <!-- 手動モード -->
+      <div id="manual-mode" style="display:none;">
+        <input id="manual-order-id"     placeholder="受注番号" required>
+        <input id="manual-customer"     placeholder="得意先"   required>
+        <input id="manual-title"        placeholder="品名"     required>
+        <button id="manual-confirm-btn">入力確定</button>
+        <button id="start-scan-btn">バーコード入力に切替</button>
+      </div>
+
+      <!-- 詳細表示（初期は非表示） -->
+      <div id="case-details" style="display:none;">
+        <div>受注番号: <span id="detail-order-id"></span></div>
+        <div>得意先:   <span id="detail-customer"></span></div>
+        <div>品名:     <span id="detail-title"></span></div>
+
+        <h4>追跡番号リスト設定</h4>
+        <div id="fixed-carrier-container">
+          <label>
+            <input type="checkbox" id="fixed-carrier-checkbox">
+            運送会社を固定
+          </label>
+          <select id="fixed-carrier-select" style="display:none;">
+            <option value="">運送会社選択してください</option>
+            <option value="sagawa">佐川急便</option>
+            <option value="yamato">ヤマト運輸</option>
+            <option value="fukutsu">福山通運</option>
+            <option value="seino">西濃運輸</option>
+            <option value="tonami">トナミ運輸</option>
+            <option value="hida">飛騨運輸</option>
+          </select>
+        </div>
+
+        <div id="tracking-rows"></div>
+        <!-- カメラ起動ボタン（無効化中） -->
+        <button id="btnScan1D" class="small-btn">カメラ起動</button>
+        <button id="add-tracking-row-btn">＋追跡番号行を追加</button>
+
+        <button id="confirm-add-case-btn">登録</button>
+        <p id="add-case-msg"></p>
+        <button id="another-case-btn">別の案件を追加</button>
+      </div>
+    </div>
+
+    <!-- 案件検索ビュー -->
+    <div id="search-view" class="subview" style="display:none;">
+      <h3>案件検索</h3>
+      <input id="search-input" placeholder="キーワード（注番／得意先／タイトル）">
+      <!-- 期間指定: 開始日と終了日 -->
+      <label>開始日:<input type="date" id="start-date"></label>
+      <label>終了日:<input type="date" id="end-date"></label>
+      <button id="search-btn">検索</button>
+      <button id="list-all-btn">一覧表示</button>
+      <ul id="search-results"></ul>
+      <!-- 選択削除ボタン（管理者のみ表示） -->
+      <button id="delete-selected-btn" style="display:none;">選択削除</button>
+    </div>
+
+    <!-- 案件詳細ビュー -->
+    <div id="case-detail-view" class="subview" style="display:none;">
+      <h3>案件詳細</h3>
+      <div id="detail-info"></div>
+
+      <h4>追跡情報</h4>
+      <ul id="detail-shipments"></ul>
+
+      <div id="detail-add-msg"></div>
+
+      <button id="show-add-tracking-btn">追跡番号追加</button>
+      <div id="add-tracking-detail" style="display:none; margin-top:1em;">
+        <h4>追跡番号追加</h4>
+
+        <!-- 運送会社一括指定（詳細画面用） -->
+        <div id="fixed-carrier-container-detail">
+          <label>
+            <input type="checkbox" id="fixed-carrier-checkbox-detail">
+            運送会社を固定
+          </label>
+          <select id="fixed-carrier-select-detail" style="display:none;">
+            <option value="">運送会社選択してください</option>
+            <option value="sagawa">佐川急便</option>
+            <option value="yamato">ヤマト運輸</option>
+            <option value="fukutsu">福山通運</option>
+            <option value="seino">西濃運輸</option>
+            <option value="tonami">トナミ運輸</option>
+            <option value="hida">飛騨運輸</option>
+          </select>
+        </div>
+
+        <div id="detail-tracking-rows"></div>
+        <button id="detail-add-tracking-row-btn">＋追跡番号行を追加</button>
+        <button id="confirm-detail-add-btn">追加登録</button>
+        <p id="detail-add-msg"></p>
+        <button id="cancel-detail-add-btn">キャンセル</button>
+      </div>
+
+      <button id="back-to-search-btn">検索に戻る</button>
+      <button id="another-case-btn-2">別の案件を追加</button>
+    </div>
+  </div>
+
+  <video id="video2d" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:10001; object-fit:cover;"></video>
+  <video id="video1d" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:10001; object-fit:cover;"></video>
+  <script src="main.js"></script>
+</body>
+</html>
