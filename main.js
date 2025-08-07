@@ -133,7 +133,10 @@ async function selectBackCamera() {
     const backs = devices.filter(d =>
       d.kind === 'videoinput' && /back|rear|environment/i.test(d.label)
     );
-    if (backs.length > 1) return backs[1].deviceId;
+    // 背面カメラが複数ある場合、下から二番目のレンズを使用
+    if (backs.length >= 2) {
+      return backs[backs.length - 2].deviceId;
+    }
     if (backs.length === 1) return backs[0].deviceId;
   } catch (e) {
     // ignore
