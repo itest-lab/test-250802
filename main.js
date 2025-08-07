@@ -351,6 +351,45 @@ const fixedCarrierSelectDetail   = document.getElementById("fixed-carrier-select
 const backToSearchBtn       = document.getElementById("back-to-search-btn");
 const anotherCaseBtn2       = document.getElementById("another-case-btn-2");
 
+let inactivityTimer = null;
+
+// ログアウト処理
+function doLogout() {
+  auth.signOut().then(() => {
+    // ログアウト後、ログイン画面へ
+    window.location.href = '/login.html';
+  });
+}
+
+// 「最後の操作」から10分後にログアウトするタイマーを（再）セット
+function resetInactivityTimer() {
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(doLogout, 10 * 60 * 1000);  // 10分
+}
+
+// ページ内操作を検知してタイマーをリセット
+function initInactivityMonitor() {
+  // 最初にタイマーをセット
+  resetInactivityTimer();
+
+  // ページ内操作とみなすイベント一覧
+  ['click', 'keydown', 'mousemove', 'touchstart'].forEach(evt => {
+    document.addEventListener(evt, resetInactivityTimer, { passive: true });
+  });
+}
+
+// --- ログイン処理 ---
+loginBtn.addEventListener('click', async () => {
+  const email = emailInput.value.trim();
+  const pass  = passwordInput.value;
+  try {
+    await auth.signInWithEmailAndPassword(email, pass);
+    // 成功後は onAuthStateChanged が検知してページ遷移＆監視開始
+  } catch (err) {
+    alert('ログインエラー：' + err.message);
+  }
+});
+
 // --- セッションタイムスタンプ管理 ---
 // 10分以内のリロードはセッション維持する
 const SESSION_LIMIT_MS = 10 * 60 * 1000;
@@ -403,8 +442,18 @@ if(loginView.style.display !== "none"){
 // --- 認証監視 ---
 auth.onAuthStateChanged(async user => {
   if (user) {
+    // ログイン中なら…
+    // 1) index.html以外ならリダイレクト
+    if (!window.location.pathname.endsWith('index.html')) {
+      window.location.href = '/index.html';
+      return;
+    }
+
+    // 2) ページ内無操作チェックを有効化
+    initInactivityMonitor();
+
+    // 3) 管理者判定
     try {
-      // Realtime DB の admins/{uid} が true なら管理者扱い
       const snap = await db.ref(`admins/${user.uid}`).once("value");
       isAdmin = snap.val() === true;
     } catch (e) {
@@ -412,21 +461,28 @@ auth.onAuthStateChanged(async user => {
       isAdmin = false;
     }
 
-    loginView.style.display = "none";
-    signupView.style.display = "none";
-    mainView.style.display = "block";
+    // 4) 各ビューの表示切り替え
+    loginView.style.display   = "none";
+    signupView.style.display  = "none";
+    mainView.style.display    = "block";
     showView("add-case-view");
     initAddCaseView();
-    startSessionTimer();
-    // 管理者の場合は一括削除ボタンの表示を更新
+
+    // 5) 管理者の場合だけ削除ボタンを表示
     deleteSelectedBtn.style.display = isAdmin ? "block" : "none";
+
   } else {
-    // ログアウト時
+    // ログアウト時 or 未ログイン時の処理
     isAdmin = false;
-    loginView.style.display = "block";
-    signupView.style.display = "none";
-    mainView.style.display = "none";
+
+    // タイマーをクリアしておく
+    clearInactivityTimer();
     clearLoginTime();
+
+    // ビューの切り替え
+    loginView.style.display   = "block";
+    signupView.style.display  = "none";
+    mainView.style.display    = "none";
   }
 });
 
