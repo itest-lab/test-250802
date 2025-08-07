@@ -71,20 +71,6 @@ const signupErrorEl         = document.getElementById("signup-error");
 const navAddBtn             = document.getElementById("nav-add-btn");
 const navSearchBtn          = document.getElementById("nav-search-btn");
 
-// ------------------------------------------------------------
-// デバイスがスマホかどうかを判定する。
-// true の場合のみカメラ起動ボタンを表示・機能させる
-const isMobileDevice = (() => {
-  try {
-    // Some browsers support navigator.userAgentData.mobile
-    if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') {
-      return navigator.userAgentData.mobile;
-    }
-  } catch (e) {}
-  // Fallback: examine the user agent string
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-})();
-
 const scanModeDiv           = document.getElementById("scan-mode");
 const manualModeDiv         = document.getElementById("manual-mode");
 const startManualBtn        = document.getElementById("start-manual-btn");
@@ -94,17 +80,6 @@ const manualCustomerInput   = document.getElementById("manual-customer");
 const manualTitleInput      = document.getElementById("manual-title");
 const manualConfirmBtn      = document.getElementById("manual-confirm-btn");
 const startScanBtn          = document.getElementById("start-scan-btn");
-
-// QRスキャン用ボタン（スマホのみ）
-const btnScan2D = document.getElementById("btnScan2D");
-if (btnScan2D) {
-  // スマホ以外ではボタンを非表示
-  btnScan2D.style.display = isMobileDevice ? "inline-block" : "none";
-  btnScan2D.addEventListener("click", () => {
-    // 'case-barcode' 入力欄にQRコードを読み取り結果を反映させる
-    start2DScanner("case-barcode");
-  });
-}
 
 const caseDetailsDiv        = document.getElementById("case-details");
 const detailOrderId         = document.getElementById("detail-order-id");
@@ -421,19 +396,6 @@ function createTrackingRow(context="add"){
   });
   row.appendChild(inp);
 
-  // スマホの場合は追跡番号入力欄の右側にカメラ起動ボタンを追加する
-  if (isMobileDevice) {
-    const camBtn = document.createElement("button");
-    camBtn.type = "button";
-    camBtn.textContent = "カメラ起動";
-    camBtn.className = "small-btn camera-btn";
-    camBtn.addEventListener("click", () => {
-      // 入力欄に1次元バーコードを読み取って自動入力する
-      start1DScanner(uniqueId);
-    });
-    row.appendChild(camBtn);
-  }
-
   // リアルタイムで運送会社未選択行を強調する
   function updateMissingHighlight() {
     // 追跡番号が入力されているか？
@@ -501,11 +463,59 @@ function initAddCaseView(){
   fixedCarrierSelect.value      = "";
   trackingRows.innerHTML        = "";
   for(let i=0;i<10;i++) trackingRows.appendChild(createTrackingRow());
+
+  // カメラプレビュー操作
+  const scanBtn = document.getElementById('btnScan2D');
+  if (scanBtn) scanBtn.onclick = () => { showCameraOverlay(); start2DScanner('case-barcode'); };
+  const closeBtn = document.getElementById('btnCloseCamera');
+  if (closeBtn) closeBtn.onclick = () => { stopCameraOverlay(); stop2DScanner(); };
+  const lightBtn = document.getElementById('btnToggleLight');
+  if (lightBtn) lightBtn.onclick = () => { toggleTorch(); };
+
+  function showCameraOverlay() {
+    document.getElementById('camera-overlay-container').classList.remove('hidden');
+  }
+  function stopCameraOverlay() {
+    document.getElementById('camera-overlay-container').classList.add('hidden');
+  }
+  let torchEnabled = false;
+  async function toggleTorch() {
+    const video = document.getElementById('camera-video');
+    const track = video.srcObject?.getVideoTracks()[0];
+    if (!track) return;
+    torchEnabled = !torchEnabled;
+    try { await track.applyConstraints({ advanced: [{ torch: torchEnabled }] }); }
+    catch (e) { console.warn('Torch not supported', e); }
+  }
 }
 
 // --- 行追加・固定キャリア切替 ---
 addTrackingRowBtn.onclick = () => {
   for(let i=0;i<10;i++) trackingRows.appendChild(createTrackingRow());
+
+  // カメラプレビュー操作
+  const scanBtn = document.getElementById('btnScan2D');
+  if (scanBtn) scanBtn.onclick = () => { showCameraOverlay(); start2DScanner('case-barcode'); };
+  const closeBtn = document.getElementById('btnCloseCamera');
+  if (closeBtn) closeBtn.onclick = () => { stopCameraOverlay(); stop2DScanner(); };
+  const lightBtn = document.getElementById('btnToggleLight');
+  if (lightBtn) lightBtn.onclick = () => { toggleTorch(); };
+
+  function showCameraOverlay() {
+    document.getElementById('camera-overlay-container').classList.remove('hidden');
+  }
+  function stopCameraOverlay() {
+    document.getElementById('camera-overlay-container').classList.add('hidden');
+  }
+  let torchEnabled = false;
+  async function toggleTorch() {
+    const video = document.getElementById('camera-video');
+    const track = video.srcObject?.getVideoTracks()[0];
+    if (!track) return;
+    torchEnabled = !torchEnabled;
+    try { await track.applyConstraints({ advanced: [{ torch: torchEnabled }] }); }
+    catch (e) { console.warn('Torch not supported', e); }
+  }
 };
 fixedCarrierCheckbox.onchange = () => {
   fixedCarrierSelect.style.display = fixedCarrierCheckbox.checked ? "block" : "none";
@@ -870,14 +880,7 @@ function scan2D(video, inputId) {
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const code = jsQR(img.data, img.width, img.height);
     if (code) {
-      // 読み取ったデータを対象の入力欄にセットし、Enter キーイベントを送信して次の処理を呼び出す
-      const inputEl = document.getElementById(inputId);
-      if (inputEl) {
-        inputEl.value = code.data;
-        // キーボードイベントを発火させることで既存の Enter 処理を流用する
-        const event = new KeyboardEvent('keydown', { key: 'Enter' });
-        inputEl.dispatchEvent(event);
-      }
+      document.getElementById(inputId).value = code.data;
       stop2DScanner();
       return;
     }
@@ -914,13 +917,7 @@ function start1DScanner(inputId) {
   Quagga.onDetected(result => {
     const code = result.codeResult?.code;
     if (code) {
-      const inputEl = document.getElementById(inputId);
-      if (inputEl) {
-        inputEl.value = code;
-        // Enter キーを送信して次の処理を呼び出す
-        const event = new KeyboardEvent('keydown', { key: 'Enter' });
-        inputEl.dispatchEvent(event);
-      }
+      document.getElementById(inputId).value = code;
       Quagga.stop();
       video.style.display = 'none';
     }

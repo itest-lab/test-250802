@@ -12,10 +12,10 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
   <!-- ZLIB 展開用 pako -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-  <!-- ２次元コード読み取りライブラリ -->
-  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
-  <!-- １次元バーコード読み取りライブラリ -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+  <!-- ２次元コード読み取り（カメラ機能コメント化中） -->
+  <!-- <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script> -->
+  <!-- １次元バーコード読み取り（カメラ機能コメント化中） -->
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script> -->
 </head>
 <body>
   <!-- 読み込み中オーバーレイ -->
@@ -66,9 +66,16 @@
       <!-- スキャンモード -->
       <div id="scan-mode" style="display:none;">
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
-        <!-- カメラ起動ボタン（スマホのみ表示） -->
-        <button id="btnScan2D" class="small-btn camera-btn" type="button">カメラ起動</button>
+        <!-- カメラ起動ボタン（無効化中） -->
+        <!-- <button id="btnScan2D" class="small-btn" type="button">カメラ起動</button> -->
+        <button id="btnScan2D" class="toggle-btn">カメラ起動</button>
         <button id="start-manual-btn">手動入力へ切替</button>
+      </div>
+      <!-- カメラプレビューオーバーレイ -->
+      <div id="camera-overlay-container" class="hidden">
+        <video id="camera-video" autoplay playsinline></video>
+        <button id="btnToggleLight" class="camera-btn-overlay">🔦</button>
+        <button id="btnCloseCamera" class="camera-btn-overlay">✕</button>
       </div>
 
       <!-- 手動モード -->
@@ -104,6 +111,8 @@
         </div>
 
         <div id="tracking-rows"></div>
+        <!-- カメラ起動ボタン（無効化中） -->
+        <!-- <button id="btnScan1D" class="small-btn">カメラ起動</button> -->
         <button id="add-tracking-row-btn">＋追跡番号行を追加</button>
 
         <button id="confirm-add-case-btn">登録</button>
@@ -172,10 +181,6 @@
       <button id="another-case-btn-2">別の案件を追加</button>
     </div>
   </div>
-
-  <!-- カメラプレビュー用ビデオ要素 -->
-  <video id="video2d" style="display:none;width:100%;height:auto;" playsinline></video>
-  <video id="video1d" style="display:none;width:100%;height:auto;" playsinline></video>
 
   <script src="main.js"></script>
 </body>
