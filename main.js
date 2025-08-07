@@ -305,21 +305,21 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
   // 案件追加用カメラ／ファイルボタン
-  const caseCameraBtn = document.getElementById('case-camera-btn');
   const caseFileInput = document.getElementById('case-file-input');
-  if (caseCameraBtn) {
-    if (canUseCamera()) {
-      // カメラが利用可能な場合はカメラ起動ボタンを表示し、ファイル選択を隠す
-      caseCameraBtn.style.display = 'block';
-      if (caseFileInput) caseFileInput.style.display = 'none';
-      caseCameraBtn.addEventListener('click', () => {
-        // QR/PDF417 を対象とする
-        startScanning([
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.PDF_417
-        ], 'case-barcode');
-      });
-    } else {
+  const caseCameraBtn = document.getElementById('case-camera-btn');
+  const caseFileBtn   = document.getElementById('case-file-btn');
+  if (caseCameraBtn && caseFileBtn) {
+    caseCameraBtn.textContent = 'カメラ起動';
+    caseCameraBtn.style.display = 'block';
+    // カメラ起動ボタンで撮影用ファイル選択ボタンを表示
+    caseCameraBtn.addEventListener('click', () => {
+      caseFileBtn.style.display = 'block';
+    });
+    // ファイル選択ボタンでカメラ撮影 or 既存ファイルを読み込んでスキャン
+    caseFileBtn.addEventListener('click', () => {
+      scanFileForInput('case-barcode', [Html5QrcodeSupportedFormats.QR_CODE]);
+    });
+  }　else {
       // カメラが利用できない場合はファイル選択による読み取りを使用
       caseCameraBtn.style.display = 'none';
       if (caseFileInput) {
@@ -712,7 +712,8 @@ function createTrackingRow(context="add"){
     // 非表示の file input を用意し、ボタン押下時にクリックさせる
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = 'image/*';
+    fileInput.accept = '*/*';
+    fileInput.capture = 'environment';
     fileInput.style.display = 'none';
     const fileBtn = document.createElement('button');
     fileBtn.type = 'button';
