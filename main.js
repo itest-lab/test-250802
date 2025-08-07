@@ -305,10 +305,10 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
   // 案件追加用カメラ／ファイルボタン
-  const caseFileInput = document.getElementById('case-file-input');
   const caseCameraBtn = document.getElementById('case-camera-btn');
   const caseFileBtn   = document.getElementById('case-file-btn');
-  if (caseCameraBtn && caseFileBtn) {
+  const caseFileInput = document.getElementById('case-file-input');
+  if (caseCameraBtn && caseFileBtn && caseFileInput) {
     caseCameraBtn.textContent = 'カメラ起動';
     caseCameraBtn.style.display = 'block';
     // カメラ起動ボタンで撮影用ファイル選択ボタンを表示
@@ -317,165 +317,18 @@ window.addEventListener('DOMContentLoaded', () => {
     });
     // ファイル選択ボタンでカメラ撮影 or 既存ファイルを読み込んでスキャン
     caseFileBtn.addEventListener('click', () => {
-      scanFileForInput('case-barcode', [Html5QrcodeSupportedFormats.QR_CODE]);
+      caseFileInput.click();
     });
-  }　else {
-      // カメラが利用できない場合はファイル選択による読み取りを使用
-      caseCameraBtn.style.display = 'none';
-      if (caseFileInput) {
-        caseFileInput.style.display = 'block';
-        // ファイル選択時に読み取り処理を実行
-        caseFileInput.addEventListener('change', e => {
-          const file = e.target.files && e.target.files[0];
-          if (file) {
-            scanFileForInput(file, 'case-barcode', false);
-          }
-          // 同じファイルを再度選択したときに change イベントが発火するよう値をリセット
-          e.target.value = '';
-        });
+    // ファイル選択時に読み取り処理を実施
+    caseFileInput.addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) {
+        scanFileForInput(f, 'case-barcode', false);
       }
-    }
+      e.target.value = '';
+    });
   }
 });
-
-let isAdmin = false;
-let sessionTimer;
-let currentOrderId = null;
-
-// --- DOM取得 ---
-const loginView             = document.getElementById("login-view");
-const mainView              = document.getElementById("main-view");
-const loginErrorEl          = document.getElementById("login-error");
-const emailInput            = document.getElementById("email");
-const passwordInput         = document.getElementById("password");
-const loginBtn              = document.getElementById("login-btn");
-const signupBtn             = document.getElementById("signup-btn");
-const guestBtn              = document.getElementById("guest-btn");
-const resetBtn              = document.getElementById("reset-btn");
-const logoutBtn             = document.getElementById("logout-btn");
-
-// 新規登録ビュー関連
-const signupView            = document.getElementById("signup-view");
-const signupEmail           = document.getElementById("signup-email");
-const signupPassword        = document.getElementById("signup-password");
-const signupConfirmPassword = document.getElementById("signup-confirm-password");
-const signupConfirmBtn      = document.getElementById("signup-confirm-btn");
-const backToLoginBtn        = document.getElementById("back-to-login-btn");
-const signupErrorEl         = document.getElementById("signup-error");
-
-const navAddBtn             = document.getElementById("nav-add-btn");
-const navSearchBtn          = document.getElementById("nav-search-btn");
-
-const scanModeDiv           = document.getElementById("scan-mode");
-const manualModeDiv         = document.getElementById("manual-mode");
-const startManualBtn        = document.getElementById("start-manual-btn");
-const caseBarcodeInput      = document.getElementById("case-barcode");
-const manualOrderIdInput    = document.getElementById("manual-order-id");
-const manualCustomerInput   = document.getElementById("manual-customer");
-const manualTitleInput      = document.getElementById("manual-title");
-const manualConfirmBtn      = document.getElementById("manual-confirm-btn");
-const startScanBtn          = document.getElementById("start-scan-btn");
-
-const caseDetailsDiv        = document.getElementById("case-details");
-const detailOrderId         = document.getElementById("detail-order-id");
-const detailCustomer        = document.getElementById("detail-customer");
-const detailTitle           = document.getElementById("detail-title");
-
-const fixedCarrierCheckbox  = document.getElementById("fixed-carrier-checkbox");
-const fixedCarrierSelect    = document.getElementById("fixed-carrier-select");
-const trackingRows          = document.getElementById("tracking-rows");
-const addTrackingRowBtn     = document.getElementById("add-tracking-row-btn");
-const confirmAddCaseBtn     = document.getElementById("confirm-add-case-btn");
-const addCaseMsg            = document.getElementById("add-case-msg");
-const anotherCaseBtn        = document.getElementById("another-case-btn");
-
-const searchView            = document.getElementById("search-view");
-const searchInput           = document.getElementById("search-input");
-const startDateInput        = document.getElementById("start-date");
-const endDateInput          = document.getElementById("end-date");
-const searchBtn             = document.getElementById("search-btn");
-const listAllBtn            = document.getElementById("list-all-btn");
-const searchResults         = document.getElementById("search-results");
-const deleteSelectedBtn     = document.getElementById("delete-selected-btn");
-
-// 一覧表示用 全選択チェックボックス関連
-const selectAllContainer    = document.getElementById("select-all-container");
-const selectAllCheckbox     = document.getElementById("select-all-checkbox");
-
-// 全選択チェックボックスの挙動
-if (selectAllCheckbox) {
-  selectAllCheckbox.onchange = () => {
-    const check = selectAllCheckbox.checked;
-    const boxes = searchResults.querySelectorAll(".select-case-checkbox");
-    boxes.forEach(cb => {
-      cb.checked = check;
-    });
-  };
-}
-
-const caseDetailView        = document.getElementById("case-detail-view");
-const detailInfoDiv         = document.getElementById("detail-info");
-const detailShipmentsUl     = document.getElementById("detail-shipments");
-const showAddTrackingBtn    = document.getElementById("show-add-tracking-btn");
-const addTrackingDetail     = document.getElementById("add-tracking-detail");
-const detailTrackingRows    = document.getElementById("detail-tracking-rows");
-const detailAddRowBtn       = document.getElementById("detail-add-tracking-row-btn");
-const confirmDetailAddBtn   = document.getElementById("confirm-detail-add-btn");
-const detailAddMsg          = document.getElementById("detail-add-msg");
-const cancelDetailAddBtn    = document.getElementById("cancel-detail-add-btn");
-const fixedCarrierCheckboxDetail = document.getElementById("fixed-carrier-checkbox-detail");
-const fixedCarrierSelectDetail   = document.getElementById("fixed-carrier-select-detail");
-const backToSearchBtn       = document.getElementById("back-to-search-btn");
-const anotherCaseBtn2       = document.getElementById("another-case-btn-2");
-
-// --- セッションタイムスタンプ管理 ---
-// 10分以内のリロードはセッション維持する
-const SESSION_LIMIT_MS = 10 * 60 * 1000;
-function clearLoginTime() {
-  localStorage.removeItem('loginTime');
-}
-function markLoginTime() {
-  localStorage.setItem('loginTime', Date.now().toString());
-}
-function isSessionExpired() {
-  const t = parseInt(localStorage.getItem('loginTime') || '0', 10);
-  return (Date.now() - t) > SESSION_LIMIT_MS;
-}
-
-// ページ読み込み時にセッション期限切れならサインアウト
-if (isSessionExpired()) {
-  auth.signOut().catch(err => {
-    console.warn("セッションタイムアウト時サインアウト失敗:", err);
-  });
-  clearLoginTime();
-}
-
-function showView(id){
-  document.querySelectorAll(".subview").forEach(el=>el.style.display="none");
-  const target = document.getElementById(id);
-  if (target) target.style.display = "block";
-  // 画面ごとに最上部入力要素へフォーカス
-  switch(id){
-    case "add-case-view":
-      if(scanModeDiv.style.display !== "none"){
-//        caseBarcodeInput.focus();
-      } else if(manualModeDiv.style.display !== "none"){
-//        manualOrderIdInput.focus();
-      }
-      break;
-    case "search-view":
-//      searchInput.focus();
-      break;
-    case "case-detail-view":
-//      showAddTrackingBtn.focus();
-      break;
-  }
-}
-
-// ページロード直後にメール入力へフォーカス
-if(loginView.style.display !== "none"){
-//  emailInput.focus();
-}
 
 // --- 認証監視 ---
 auth.onAuthStateChanged(async user => {
