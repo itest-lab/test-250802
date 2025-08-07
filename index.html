@@ -70,8 +70,10 @@
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
         <!-- 案件追加用カメラ起動ボタン -->
         <!-- スマートフォンかつカメラ使用可能なデバイスの場合のみ表示し、
-             PCやカメラ非対応端末では代わりにファイル選択ボタンを表示します。 -->
+        PCやカメラ非対応端末では代わりにファイル選択ボタンを表示します。 -->
         <button id="case-camera-btn" type="button">カメラ起動</button>
+        <!-- カメラ起動後に写真撮影用ファイル選択ボタンを表示 -->
+        <button id="case-file-btn" type="button" style="display:none;">ファイルを選択</button>
         <!-- PC 用ファイル選択ボタン。JS で制御するため初期状態では非表示 -->
         <input type="file" id="case-file-input" accept="image/*" style="display:none;" />
         <button id="start-manual-btn">手動入力へ切替</button>
