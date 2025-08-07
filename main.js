@@ -361,17 +361,23 @@ function markLoginTime() {
   localStorage.setItem('loginTime', Date.now().toString());
 }
 function isSessionExpired() {
-  const t = parseInt(localStorage.getItem('loginTime') || '0', 10);
+  const stored = localStorage.getItem('loginTime');
+  // loginTime が未設定なら期限切れ扱いにしない
+  if (!stored) return false;
+  const t = parseInt(stored, 10);
   return (Date.now() - t) > SESSION_LIMIT_MS;
 }
 
-// ページ読み込み時にセッション期限切れならサインアウト
-if (isSessionExpired()) {
-  auth.signOut().catch(err => {
-    console.warn("セッションタイムアウト時サインアウト失敗:", err);
-  });
-  clearLoginTime();
-}
+// ページ読み込み時に、loginTime がある場合のみ期限切れチェック
+window.addEventListener('load', () => {
+  const stored = localStorage.getItem('loginTime');
+  if (stored && isSessionExpired()) {
+    auth.signOut().catch(err => {
+      console.warn("セッションタイムアウト時サインアウト失敗:", err);
+    });
+    clearLoginTime();
+  }
+});
 
 function showView(id){
   document.querySelectorAll(".subview").forEach(el=>el.style.display="none");
@@ -806,7 +812,7 @@ startScanBtn.onclick = () => {
 };
 manualConfirmBtn.onclick = () => {
   if(!manualOrderIdInput.value || !manualCustomerInput.value || !manualTitleInput.value){
-    alert("必須項目を入力");
+    alert("すべての項目を入力してください");
     return;
   }
   detailOrderId.textContent  = manualOrderIdInput.value.trim();
