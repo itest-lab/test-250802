@@ -95,8 +95,7 @@ body {
       border-radius: 50%;
       animation: spin 1s linear infinite;
     }
-    /* 小さいサイズのボタンスタイル */
-    /*.small-btn {
+.small-btn {
       padding: 4px 8px;
       font-size: 0.8em;
       line-height: 1.2;

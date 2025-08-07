@@ -289,6 +289,13 @@ function createTrackingRow(context="add"){
     }
   });
   row.appendChild(inp);
+  // カメラ起動ボタンを追加
+  const camBtn = document.createElement('button');
+  camBtn.type = 'button';
+  camBtn.textContent = 'カメラ起動';
+  camBtn.className = 'small-btn';
+  camBtn.addEventListener('click', () => start1DScanner(inp.id));
+  row.appendChild(camBtn);
   return row;
 }
 
@@ -638,6 +645,7 @@ function scan2D(video, inputId) {
     const code = jsQR(img.data, img.width, img.height);
     if (code) {
       document.getElementById(inputId).value = code.data;
+      dispatchEnter(inputId);
       stop2DScanner();
       return;
     }
@@ -675,6 +683,7 @@ function start1DScanner(inputId) {
     const code = result.codeResult?.code;
     if (code) {
       document.getElementById(inputId).value = code;
+      dispatchEnter(inputId);
       Quagga.stop();
       video.style.display = 'none';
     }
@@ -682,28 +691,11 @@ function start1DScanner(inputId) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────
-// ４）カメラボタンイベントの設定
-// ─────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const btn2D = document.getElementById('btnScan2D');
-  if (btn2D) btn2D.addEventListener('click', () => start2DScanner('case-barcode'));
-  const btn1D = document.getElementById('btnScan1D');
-  if (btn1D) {
-    let currentInput = null;
-    document.getElementById('tracking-rows').addEventListener('focusin', e => {
-      if (e.target.tagName === 'INPUT') currentInput = e.target.id;
-    });
-    btn1D.addEventListener('click', () => {
-      if (!currentInput) {
-        alert('先に追跡番号入力欄を選択してください');
-      } else {
-        start1DScanner(currentInput);
-      }
-    });
-  }
-});
-// ─────────────────────────────────────────────────────────────────
+// --- Dispatch Enter key after scan completion ---
+function dispatchEnter(inputId) {
+  const el = document.getElementById(inputId);
+  el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+}
 // ５）セッションタイムアウト（10分）
 // ─────────────────────────────────────────────────────────────────
 function resetSessionTimer() {
