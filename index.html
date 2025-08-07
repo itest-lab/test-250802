@@ -12,20 +12,14 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
   <!-- ZLIB 展開用 pako -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-  <!-- ２次元コード読み取り（カメラ機能コメント化中） -->
+  <!-- カメラ読み取りライブラリ -->
+  <!-- html5-qrcode はバーコード/QRコード読取に使用します -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <!-- 旧カメラ用ライブラリはコメントアウトのまま残しておきます -->
   <!-- <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script> -->
-  <!-- １次元バーコード読み取り（カメラ機能コメント化中） -->
   <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script> -->
 </head>
 <body>
-  <!-- カメラプレビューオーバーレイ -->
-  <div id="camera-overlay" class="hidden">
-    <div class="overlay-content">
-      <video id="video-stream" autoplay playsinline></video>
-      <button id="toggle-light" class="overlay-btn">ライト</button>
-      <button id="close-camera" class="overlay-btn">×</button>
-    </div>
-  </div>
   <!-- 読み込み中オーバーレイ -->
   <div id="loadingOverlay" class="loading-overlay hidden">
     <div class="spinner"></div>
@@ -74,8 +68,9 @@
       <!-- スキャンモード -->
       <div id="scan-mode" style="display:none;">
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
-      <!-- カメラ起動ボタン -->
-      <button id="btnScan2D" class="small-btn camera-btn">カメラ起動</button>
+        <!-- 案件追加用カメラ起動ボタン -->
+        <!-- スマートフォン以外ではこのボタンは非表示になります（JS側で制御） -->
+        <button id="case-camera-btn" type="button">カメラ起動</button>
         <button id="start-manual-btn">手動入力へ切替</button>
       </div>
 
@@ -180,6 +175,16 @@
 
       <button id="back-to-search-btn">検索に戻る</button>
       <button id="another-case-btn-2">別の案件を追加</button>
+    </div>
+  </div>
+
+  <!-- カメラプレビューオーバーレイ -->
+  <!-- バーコード／QRコード読取時に画面上に表示されます -->
+  <div id="scanner-overlay" style="display:none;">
+    <div id="scanner-container">
+      <button id="torch-button" class="overlay-btn" title="ライト">💡</button>
+      <button id="close-button" class="overlay-btn" title="閉じる">✕</button>
+      <div id="video-container"></div>
     </div>
   </div>
 

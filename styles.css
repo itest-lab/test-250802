@@ -120,67 +120,86 @@ body {
   vertical-align: middle;
 }
 
-/* カメラ起動ボタン */
-.camera-btn {
-  width: 120px;
-  margin: 0.5em 0.5em 0.5em 0;
-}
-
-/* カメラプレビューオーバーレイ */
-#camera-overlay {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: rgba(0,0,0,0.8);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100000;
-}
-#camera-overlay.hidden {
+/* ==================== カメラプレビュー関連 ==================== */
+/* カメラプレビューオーバーレイのスタイルを定義します。 */
+#scanner-overlay {
   display: none;
-}
-#camera-overlay .overlay-content {
-  position: relative;
-}
-#camera-overlay video {
-  max-width: 90vw;
-  max-height: 80vh;
-  border-radius: 8px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.5);
-}
-.overlay-btn {
-  position: absolute;
-  top: 10px;
-  background: rgba(255,255,255,0.7);
-  border: none;
-  padding: 0.5em;
-  border-radius: 4px;
-  cursor: pointer;
-}
-#toggle-light {
-  left: 10px;
-}
-#close-camera {
-  right: 10px;
-}
-
-/* 追跡番号入力行のモダンUI */
-.tracking-row {
-  display: flex;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2000;
+  justify-content: center;
   align-items: center;
 }
-.tracking-row select {
-  flex: 3;
-  margin-right: 0.5em;
-  padding: 0.4em;
+#scanner-container {
+  position: relative;
+  width: 90vw;
+  max-width: 400px;
+  aspect-ratio: 9/16;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
 }
-.tracking-row input {
-  flex: 5;
-  margin-right: 0.5em;
-  padding: 0.4em;
+#video-container video,
+#video-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
 }
-.tracking-row .camera-btn {
-  flex: 1;
-  max-width: 3em;
-  padding: 0.4em;
+/* ライトと閉じるボタンのスタイル */
+.overlay-btn {
+  position: absolute;
+  top: 12px;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  z-index: 2002;
+}
+.overlay-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+#torch-button {
+  left: 12px;
+}
+#close-button {
+  right: 12px;
 }
 
+/* ==================== 追跡番号入力時のカメラボタン ==================== */
+/* モバイル端末でのみ表示されるカメラ起動ボタンのスタイル */
+.camera-btn {
+  flex: 0 0 auto;
+  padding: 0.5em;
+  font-size: 0.8em;
+  border: none;
+  border-radius: 4px;
+  background: #1976d2;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.camera-btn:hover {
+  background: #155fa0;
+}
+
+/* ボタンを横に小さく配置し、テキスト入力とリストボックスを広くとる */
+.tracking-row {
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 0.5em;
+  align-items: center;
+}
+.tracking-row select,
+.tracking-row input {
+  flex: 1;
+  padding: 0.5em;
+}

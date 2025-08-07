@@ -14,10 +14,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
-// デバイス判定（モバイル）
-const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
-
-
 // セッション永続化をブラウザのセッション単位に設定
 auth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
   .catch(err => {
@@ -46,6 +42,222 @@ const carrierUrls = {
   hida:    "http://www.hida-unyu.co.jp/WP_HIDAUNYU_WKSHO_GUEST/KW_UD04015.do?_Action_=a_srcAction",
   sagawa:  "https://k2k.sagawa-exp.co.jp/p/web/okurijosearch.do?okurijoNo="
 };
+
+// ================================================================
+//  スマホ向けカメラ読み取り機能の定義
+//
+// このプロジェクトでは html5-qrcode ライブラリを用いてバーコードや
+// QR コードを読み取り、読み取り結果を該当の入力欄へ自動入力します。
+// PC ではカメラ起動がサポートされていない環境が多いため、カメラ関連
+// ボタンはモバイル端末でのみ表示されるようにします。
+
+// モバイル端末判定関数
+function isMobileDevice() {
+  const ua = navigator.userAgent || navigator.vendor || window.opera;
+  return /android|iPad|iPhone|iPod/i.test(ua);
+}
+
+// html5-qrcode 用の一時変数
+let html5QrCode = null;
+let scanningInputId = null;
+let torchOn = false;
+
+// mm を px に変換 (印刷サイズの計算で使用)
+function mmToPx(mm) {
+  return mm * (96 / 25.4);
+}
+
+// 利用可能な背面カメラを選択 (複数ある場合は 2 番目を優先)
+async function selectBackCamera() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const backs = devices.filter(d =>
+      d.kind === 'videoinput' && /back|rear|environment/i.test(d.label)
+    );
+    if (backs.length > 1) return backs[1].deviceId;
+    if (backs.length === 1) return backs[0].deviceId;
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+// スキャン開始
+async function startScanning(formats, inputId) {
+  if (!isMobileDevice()) {
+    alert('このデバイスではカメラ機能を利用できません');
+    return;
+  }
+  // 重複起動を防ぐ
+  if (html5QrCode) {
+    try {
+      await html5QrCode.stop();
+      html5QrCode.clear();
+    } catch (e) {}
+    html5QrCode = null;
+  }
+  scanningInputId = inputId;
+
+  // オーバーレイサイズ調整
+  const margin = mmToPx(5) * 2;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const ratio = 9 / 16;
+  let w = vw - margin;
+  let h = vh - margin;
+  if (w / h > ratio) {
+    w = h * ratio;
+  } else {
+    h = w / ratio;
+  }
+  const sc = document.getElementById('scanner-container');
+  if (sc) {
+    sc.style.width = w + 'px';
+    sc.style.height = h + 'px';
+  }
+  // オーバーレイ表示
+  const overlay = document.getElementById('scanner-overlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+  // 初期化
+  html5QrCode = new Html5Qrcode('video-container', false);
+  const backId = await selectBackCamera();
+  const constraints = backId
+    ? { deviceId: { exact: backId } }
+    : { facingMode: { exact: 'environment' } };
+  const config = {
+    fps: 10,
+    formatsToSupport: formats,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    useBarCodeDetectorIfSupported: true
+  };
+  const onSuccess = decoded => {
+    try {
+      const inputEl = document.getElementById(inputId);
+      if (!inputEl) {
+        stopScanning();
+        return;
+      }
+      // CODABAR の場合は先頭と末尾が A/B/C/D であるか判定
+      if (formats.length === 1 && formats[0] === Html5QrcodeSupportedFormats.CODABAR) {
+        if (decoded && decoded.length >= 2) {
+          const pre = decoded[0];
+          const suf = decoded[decoded.length - 1];
+          if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
+            inputEl.value = decoded;
+            // 値変更イベント
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+            // Enter を送信して次の欄に移動させる
+            const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+            inputEl.dispatchEvent(enterEv);
+            stopScanning();
+          }
+        }
+      } else {
+        // QR_CODE またはその他のフォーマット
+        if (decoded) {
+          // 注文登録用 QR は ZLIB64: で始まることを想定
+          // それ以外の場合でも値を入力欄にセットする
+          inputEl.value = decoded;
+          // 入力イベント
+          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+          // Enter を送信して既存処理を発火させる
+          const enterEv2 = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+          inputEl.dispatchEvent(enterEv2);
+          stopScanning();
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      stopScanning();
+    }
+  };
+  try {
+    await html5QrCode.start(constraints, config, onSuccess, () => {});
+  } catch (e) {
+    console.error(e);
+    alert('カメラ起動に失敗しました');
+    stopScanning();
+  }
+  // フォーカス動作: プレビュー領域をタップでオートフォーカス
+  const videoContainer = document.getElementById('video-container');
+  if (videoContainer) {
+    videoContainer.addEventListener('click', async () => {
+      if (html5QrCode) {
+        try {
+          await html5QrCode.applyVideoConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+        } catch (e) {}
+      }
+    });
+  }
+}
+
+// スキャン停止
+async function stopScanning() {
+  if (html5QrCode) {
+    try {
+      await html5QrCode.stop();
+      html5QrCode.clear();
+    } catch (e) {}
+    html5QrCode = null;
+  }
+  const overlay = document.getElementById('scanner-overlay');
+  if (overlay) overlay.style.display = 'none';
+  document.body.style.overflow = '';
+  torchOn = false;
+}
+
+// ライトトグル
+async function toggleTorch() {
+  if (!html5QrCode) return;
+  try {
+    const settings = html5QrCode.getRunningTrackSettings();
+    if (!('torch' in settings)) {
+      alert('このデバイスはライトに対応していません');
+      return;
+    }
+    torchOn = !torchOn;
+    await html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+// DOMContentLoaded 時にカメラ関連 UI を初期化
+window.addEventListener('DOMContentLoaded', () => {
+  // オーバーレイのボタンにイベントを紐付け
+  const closeBtn = document.getElementById('close-button');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      stopScanning();
+    });
+  }
+  const torchBtn = document.getElementById('torch-button');
+  if (torchBtn) {
+    torchBtn.addEventListener('click', () => {
+      toggleTorch();
+    });
+  }
+  // 案件追加用カメラボタン
+  const caseCameraBtn = document.getElementById('case-camera-btn');
+  if (caseCameraBtn) {
+    if (isMobileDevice()) {
+      caseCameraBtn.style.display = 'block';
+      caseCameraBtn.addEventListener('click', () => {
+        // QR/PDF417 を対象とする
+        startScanning([
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.PDF_417
+        ], 'case-barcode');
+      });
+    } else {
+      // PC では非表示
+      caseCameraBtn.style.display = 'none';
+    }
+  }
+});
 
 let isAdmin = false;
 let sessionTimer;
@@ -399,6 +611,22 @@ function createTrackingRow(context="add"){
     }
   });
   row.appendChild(inp);
+
+  // --- カメラ起動ボタン（スマホ限定） ---
+  // 追跡番号入力欄の右側に配置し、モバイル端末の場合のみ要素を追加します。
+  if (isMobileDevice()) {
+    const camBtn = document.createElement('button');
+    camBtn.type = 'button';
+    camBtn.textContent = 'カメラ起動';
+    camBtn.className = 'camera-btn';
+    camBtn.addEventListener('click', () => {
+      // １次元バーコード (CodaBar) を対象とする
+      startScanning([
+        Html5QrcodeSupportedFormats.CODABAR
+      ], uniqueId);
+    });
+    row.appendChild(camBtn);
+  }
 
   // リアルタイムで運送会社未選択行を強調する
   function updateMissingHighlight() {
@@ -1057,61 +1285,4 @@ confirmDetailAddBtn.onclick = async () => {
         a.textContent = `${label}：${it.tracking}：取得失敗`;
       });
   });
-};
-
-
-// --- カメラプレビューオーバーレイ制御 ---
-const cameraOverlay = document.getElementById('camera-overlay');
-const videoStream = document.getElementById('video-stream');
-const toggleLightBtn = document.getElementById('toggle-light');
-const closeCameraBtn = document.getElementById('close-camera');
-let currentStream = null;
-let torchOn = false;
-
-// スキャンモード：カメラ起動
-const btnScan2D = document.getElementById('btnScan2D');
-if (btnScan2D) {
-  btnScan2D.onclick = () => openOverlay('2D', 'case-barcode');
-}
-
-// 追跡番号行：カメラ起動ボタンクリック（Event Delegation）
-document.addEventListener('click', e => {
-  if (e.target && e.target.classList.contains('camera-btn') && e.target.dataset.inputId) {
-    openOverlay('1D', e.target.dataset.inputId);
-  }
-});
-
-async function openOverlay(type, inputId) {
-  try {
-    cameraOverlay.classList.remove('hidden');
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    currentStream = stream;
-    videoStream.srcObject = stream;
-    if (type === '2D') {
-      scan2D(videoStream, inputId);
-    } else {
-      start1DScanner(inputId);
-    }
-  } catch (err) {
-    console.error('カメラ起動エラー:', err);
-  }
-}
-
-toggleLightBtn.onclick = async () => {
-  if (!currentStream) return;
-  const [track] = currentStream.getVideoTracks();
-  const caps = track.getCapabilities();
-  if (caps.torch) {
-    torchOn = !torchOn;
-    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-    toggleLightBtn.textContent = torchOn ? 'ライトOFF' : 'ライトON';
-  }
-};
-
-closeCameraBtn.onclick = () => {
-  if (currentStream) {
-    currentStream.getTracks().forEach(t => t.stop());
-    currentStream = null;
-  }
-  cameraOverlay.classList.add('hidden');
 };
