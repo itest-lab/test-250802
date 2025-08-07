@@ -18,6 +18,14 @@
   <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script> -->
 </head>
 <body>
+  <!-- カメラプレビューオーバーレイ -->
+  <div id="camera-overlay" class="hidden">
+    <div class="overlay-content">
+      <video id="video-stream" autoplay playsinline></video>
+      <button id="toggle-light" class="overlay-btn">ライト</button>
+      <button id="close-camera" class="overlay-btn">×</button>
+    </div>
+  </div>
   <!-- 読み込み中オーバーレイ -->
   <div id="loadingOverlay" class="loading-overlay hidden">
     <div class="spinner"></div>
@@ -66,16 +74,9 @@
       <!-- スキャンモード -->
       <div id="scan-mode" style="display:none;">
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
-        <!-- カメラ起動ボタン（無効化中） -->
-        <!-- <button id="btnScan2D" class="small-btn" type="button">カメラ起動</button> -->
-        <button id="btnScan2D" class="toggle-btn">カメラ起動</button>
+      <!-- カメラ起動ボタン -->
+      <button id="btnScan2D" class="small-btn camera-btn">カメラ起動</button>
         <button id="start-manual-btn">手動入力へ切替</button>
-      </div>
-      <!-- カメラプレビューオーバーレイ -->
-      <div id="camera-overlay-container" class="hidden">
-        <video id="camera-video" autoplay playsinline></video>
-        <button id="btnToggleLight" class="camera-btn-overlay">🔦</button>
-        <button id="btnCloseCamera" class="camera-btn-overlay">✕</button>
       </div>
 
       <!-- 手動モード -->

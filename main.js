@@ -14,6 +14,10 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
+// デバイス判定（モバイル）
+const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
+
+
 // セッション永続化をブラウザのセッション単位に設定
 auth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
   .catch(err => {
@@ -463,59 +467,11 @@ function initAddCaseView(){
   fixedCarrierSelect.value      = "";
   trackingRows.innerHTML        = "";
   for(let i=0;i<10;i++) trackingRows.appendChild(createTrackingRow());
-
-  // カメラプレビュー操作
-  const scanBtn = document.getElementById('btnScan2D');
-  if (scanBtn) scanBtn.onclick = () => { showCameraOverlay(); start2DScanner('case-barcode'); };
-  const closeBtn = document.getElementById('btnCloseCamera');
-  if (closeBtn) closeBtn.onclick = () => { stopCameraOverlay(); stop2DScanner(); };
-  const lightBtn = document.getElementById('btnToggleLight');
-  if (lightBtn) lightBtn.onclick = () => { toggleTorch(); };
-
-  function showCameraOverlay() {
-    document.getElementById('camera-overlay-container').classList.remove('hidden');
-  }
-  function stopCameraOverlay() {
-    document.getElementById('camera-overlay-container').classList.add('hidden');
-  }
-  let torchEnabled = false;
-  async function toggleTorch() {
-    const video = document.getElementById('camera-video');
-    const track = video.srcObject?.getVideoTracks()[0];
-    if (!track) return;
-    torchEnabled = !torchEnabled;
-    try { await track.applyConstraints({ advanced: [{ torch: torchEnabled }] }); }
-    catch (e) { console.warn('Torch not supported', e); }
-  }
 }
 
 // --- 行追加・固定キャリア切替 ---
 addTrackingRowBtn.onclick = () => {
   for(let i=0;i<10;i++) trackingRows.appendChild(createTrackingRow());
-
-  // カメラプレビュー操作
-  const scanBtn = document.getElementById('btnScan2D');
-  if (scanBtn) scanBtn.onclick = () => { showCameraOverlay(); start2DScanner('case-barcode'); };
-  const closeBtn = document.getElementById('btnCloseCamera');
-  if (closeBtn) closeBtn.onclick = () => { stopCameraOverlay(); stop2DScanner(); };
-  const lightBtn = document.getElementById('btnToggleLight');
-  if (lightBtn) lightBtn.onclick = () => { toggleTorch(); };
-
-  function showCameraOverlay() {
-    document.getElementById('camera-overlay-container').classList.remove('hidden');
-  }
-  function stopCameraOverlay() {
-    document.getElementById('camera-overlay-container').classList.add('hidden');
-  }
-  let torchEnabled = false;
-  async function toggleTorch() {
-    const video = document.getElementById('camera-video');
-    const track = video.srcObject?.getVideoTracks()[0];
-    if (!track) return;
-    torchEnabled = !torchEnabled;
-    try { await track.applyConstraints({ advanced: [{ torch: torchEnabled }] }); }
-    catch (e) { console.warn('Torch not supported', e); }
-  }
 };
 fixedCarrierCheckbox.onchange = () => {
   fixedCarrierSelect.style.display = fixedCarrierCheckbox.checked ? "block" : "none";
@@ -1101,4 +1057,61 @@ confirmDetailAddBtn.onclick = async () => {
         a.textContent = `${label}：${it.tracking}：取得失敗`;
       });
   });
+};
+
+
+// --- カメラプレビューオーバーレイ制御 ---
+const cameraOverlay = document.getElementById('camera-overlay');
+const videoStream = document.getElementById('video-stream');
+const toggleLightBtn = document.getElementById('toggle-light');
+const closeCameraBtn = document.getElementById('close-camera');
+let currentStream = null;
+let torchOn = false;
+
+// スキャンモード：カメラ起動
+const btnScan2D = document.getElementById('btnScan2D');
+if (btnScan2D) {
+  btnScan2D.onclick = () => openOverlay('2D', 'case-barcode');
+}
+
+// 追跡番号行：カメラ起動ボタンクリック（Event Delegation）
+document.addEventListener('click', e => {
+  if (e.target && e.target.classList.contains('camera-btn') && e.target.dataset.inputId) {
+    openOverlay('1D', e.target.dataset.inputId);
+  }
+});
+
+async function openOverlay(type, inputId) {
+  try {
+    cameraOverlay.classList.remove('hidden');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    currentStream = stream;
+    videoStream.srcObject = stream;
+    if (type === '2D') {
+      scan2D(videoStream, inputId);
+    } else {
+      start1DScanner(inputId);
+    }
+  } catch (err) {
+    console.error('カメラ起動エラー:', err);
+  }
+}
+
+toggleLightBtn.onclick = async () => {
+  if (!currentStream) return;
+  const [track] = currentStream.getVideoTracks();
+  const caps = track.getCapabilities();
+  if (caps.torch) {
+    torchOn = !torchOn;
+    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+    toggleLightBtn.textContent = torchOn ? 'ライトOFF' : 'ライトON';
+  }
+};
+
+closeCameraBtn.onclick = () => {
+  if (currentStream) {
+    currentStream.getTracks().forEach(t => t.stop());
+    currentStream = null;
+  }
+  cameraOverlay.classList.add('hidden');
 };
