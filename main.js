@@ -57,6 +57,65 @@ function isMobileDevice() {
   return /android|iPad|iPhone|iPod/i.test(ua);
 }
 
+// カメラ使用可能かどうかを判定するユーティリティ関数
+// モバイル端末かつ navigator.mediaDevices.getUserMedia が利用可能な場合のみ
+// true を返します。モバイルでもカメラが利用できない環境では false となり、
+// PC 同様にファイル選択による読み取りを案内します。
+function canUseCamera() {
+  const mobile = isMobileDevice();
+  const hasMedia = !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
+  return mobile && hasMedia;
+}
+
+// 画像ファイルからバーコード/QR コードを読み取り、指定の入力欄に値を設定します。
+// file   : ユーザが選択した画像ファイル
+// inputId: 読み取り結果を書き込む input 要素の id
+// isCodabar: CODABAR フォーマットを読み取るかどうか（先頭末尾の A/B/C/D を除去）
+async function scanFileForInput(file, inputId, isCodabar) {
+  // 一時的なスキャン用コンテナを用意（存在しなければ作成）
+  const tmpId = 'file-scan-temp-container';
+  let tmpEl = document.getElementById(tmpId);
+  if (!tmpEl) {
+    tmpEl = document.createElement('div');
+    tmpEl.id = tmpId;
+    tmpEl.style.display = 'none';
+    document.body.appendChild(tmpEl);
+  }
+  const scanner = new Html5Qrcode(tmpId);
+  try {
+    // scanFile の第 2 引数を true にすると詳細結果が返るため decodedText を参照します
+    const result = await scanner.scanFile(file, true);
+    let decoded = (result && result.decodedText) ? result.decodedText : result;
+    if (decoded) {
+      // CODABAR の場合は先頭と末尾の制御文字を除去
+      if (isCodabar) {
+        if (decoded.length >= 2) {
+          const pre = decoded.charAt(0);
+          const suf = decoded.charAt(decoded.length - 1);
+          if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
+            decoded = decoded.substring(1, decoded.length - 1);
+          }
+        }
+      }
+      const inputEl = document.getElementById(inputId);
+      if (inputEl) {
+        inputEl.value = decoded;
+        // 入力イベントを発火させ、既存の入力処理をトリガする
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        // Enter キーイベントを発火させることでエンターキーと同等の処理を実行
+        const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+        inputEl.dispatchEvent(enterEv);
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    alert('ファイルからコードを読み取れませんでした');
+  } finally {
+    // 後片付け
+    scanner.clear();
+  }
+}
+
 // html5-qrcode 用の一時変数
 let html5QrCode = null;
 let scanningInputId = null;
@@ -242,11 +301,14 @@ window.addEventListener('DOMContentLoaded', () => {
       toggleTorch();
     });
   }
-  // 案件追加用カメラボタン
+  // 案件追加用カメラ／ファイルボタン
   const caseCameraBtn = document.getElementById('case-camera-btn');
+  const caseFileInput = document.getElementById('case-file-input');
   if (caseCameraBtn) {
-    if (isMobileDevice()) {
+    if (canUseCamera()) {
+      // カメラが利用可能な場合はカメラ起動ボタンを表示し、ファイル選択を隠す
       caseCameraBtn.style.display = 'block';
+      if (caseFileInput) caseFileInput.style.display = 'none';
       caseCameraBtn.addEventListener('click', () => {
         // QR/PDF417 を対象とする
         startScanning([
@@ -255,8 +317,20 @@ window.addEventListener('DOMContentLoaded', () => {
         ], 'case-barcode');
       });
     } else {
-      // PC では非表示
+      // カメラが利用できない場合はファイル選択による読み取りを使用
       caseCameraBtn.style.display = 'none';
+      if (caseFileInput) {
+        caseFileInput.style.display = 'block';
+        // ファイル選択時に読み取り処理を実行
+        caseFileInput.addEventListener('change', e => {
+          const file = e.target.files && e.target.files[0];
+          if (file) {
+            scanFileForInput(file, 'case-barcode', false);
+          }
+          // 同じファイルを再度選択したときに change イベントが発火するよう値をリセット
+          e.target.value = '';
+        });
+      }
     }
   }
 });
@@ -614,9 +688,11 @@ function createTrackingRow(context="add"){
   });
   row.appendChild(inp);
 
-  // --- カメラ起動ボタン（スマホ限定） ---
-  // 追跡番号入力欄の右側に配置し、モバイル端末の場合のみ要素を追加します。
-  if (isMobileDevice()) {
+  // --- カメラ起動／ファイル選択ボタン ---
+  // 追跡番号入力欄の右側に配置します。カメラが利用可能な場合は「カメラ起動」ボタンを、
+  // PC やカメラ非対応端末では「ファイルを選択」ボタンを表示します。
+  if (canUseCamera()) {
+    // モバイルかつカメラ対応: カメラ起動ボタン
     const camBtn = document.createElement('button');
     camBtn.type = 'button';
     camBtn.textContent = 'カメラ起動';
@@ -628,6 +704,33 @@ function createTrackingRow(context="add"){
       ], uniqueId);
     });
     row.appendChild(camBtn);
+  } else {
+    // PC など: ファイル選択ボタン
+    // 非表示の file input を用意し、ボタン押下時にクリックさせる
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    const fileBtn = document.createElement('button');
+    fileBtn.type = 'button';
+    fileBtn.textContent = 'ファイルを選択';
+    // カメラボタンと同じスタイルを適用
+    fileBtn.className = 'camera-btn';
+    fileBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+    // ファイル選択時に読み取り処理を実施
+    fileInput.addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) {
+        // CODABAR 用フラグを true にする
+        scanFileForInput(f, uniqueId, true);
+      }
+      // 同じファイルを再度選択したときのために値をリセット
+      e.target.value = '';
+    });
+    row.appendChild(fileBtn);
+    row.appendChild(fileInput);
   }
 
   // リアルタイムで運送会社未選択行を強調する
@@ -1114,7 +1217,9 @@ function start1DScanner(inputId) {
 // ５）セッションタイムアウト（10分）
 // ─────────────────────────────────────────────────────────────────
 function resetSessionTimer() {
+  // 既存のタイマーをキャンセル
   clearTimeout(sessionTimer);
+  // 新しいタイマーを設定し、10分間操作がない場合にログアウト処理を実施します
   sessionTimer = setTimeout(() => {
     alert('セッションが10分を超えました。再度ログインしてください。');
     auth.signOut();
@@ -1122,10 +1227,18 @@ function resetSessionTimer() {
     emailInput.value    = "";
     passwordInput.value = "";
   }, SESSION_LIMIT_MS);
+  // この関数はユーザー操作時に呼び出されるため、操作があったタイミングで
+  // loginTime を更新しセッションを延長します
+  markLoginTime();
 }
 function startSessionTimer() {
+  // タイマーを初期化
   resetSessionTimer();
-  ['click','keydown','touchstart'].forEach(evt => document.addEventListener(evt, resetSessionTimer));
+  // セッションタイマーをリセットする対象イベントを定義します
+  const events = ['click', 'keydown', 'touchstart', 'input', 'change'];
+  events.forEach(evt => {
+    document.addEventListener(evt, resetSessionTimer);
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────
