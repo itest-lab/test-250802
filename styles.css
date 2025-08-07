@@ -177,7 +177,9 @@ body {
 /* ==================== 追跡番号入力時のカメラボタン ==================== */
 /* モバイル端末でのみ表示されるカメラ起動ボタンのスタイル */
 .camera-btn {
-  flex: 0 0 2cm;
+  box-sizing: border-box;
+  width: 2cm;
+  flex: 0 0 auto;
   padding: 0.5em;
   font-size: 0.8em;
   border: none;
