@@ -146,7 +146,9 @@ async function startScanning(formats, inputId) {
           const pre = decoded[0];
           const suf = decoded[decoded.length - 1];
           if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
-            inputEl.value = decoded;
+            // 先頭と末尾を除去
+            const trimmed = decoded.substring(1, decoded.length - 1);
+            inputEl.value = trimmed;
             // 値変更イベント
             inputEl.dispatchEvent(new Event('input', { bubbles: true }));
             // Enter を送信して次の欄に移動させる
