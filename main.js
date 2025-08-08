@@ -371,9 +371,7 @@ if (typeof window.isSessionExpired !== 'function') {
     } catch (_) { return false; }
   };
 }
-function clearLoginTime() {
-  try { localStorage.removeItem('loginTime'); } catch (_) {}
-}
+function clearLoginTime(){ try{ localStorage.removeItem('loginTime'); }catch(_){} }
 function markLoginTime() {
   localStorage.setItem('loginTime', Date.now().toString());
 }
@@ -493,22 +491,42 @@ logoutBtn.onclick = async () => {
   // セッションタイムスタンプ削除
   clearLoginTime();
   // localStorage をまるごとクリア
-  localStorage.clear();
+  try { localStorage.clear(); } catch(_) {}
 };
 
-// ログイン状態が変わったときに呼ばれるリスナー
-auth.onAuthStateChanged(user => {
-  const statusContainer = document.getElementById('login-status-container');
-  statusContainer.textContent = '';  // まずクリア
 
+function ensureStatusBar(){
+  let el = document.getElementById('login-status-container');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'login-status-container';
+    el.style.position = 'fixed';
+    el.style.left = '0';
+    el.style.right = '0';
+    el.style.bottom = '0';
+    el.style.padding = '8px 12px';
+    el.style.fontSize = '14px';
+    el.style.background = '#f0f4ff';
+    el.style.borderTop = '1px solid #cdd7ff';
+    el.style.color = '#334';
+    el.style.zIndex = '2147483647';
+    el.style.textAlign = 'center';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+// ログイン状態が変わったときに呼ばれるリスナー
+
+auth.onAuthStateChanged(user => {
+  const statusContainer = ensureStatusBar();
+  if (!statusContainer) return;
+  statusContainer.textContent = '';
   if (user) {
-    // ログイン中
-    // user.email や user.uid など好きな情報を表示できます
-    statusContainer.textContent = `${user.email} でログイン中`;
+    statusContainer.textContent = `${user.email || 'ログイン中'} でログイン中`;
   } else {
-    // 未ログイン時はなにも表示しない or 別文言を出してもOK
     statusContainer.textContent = 'ログインしてください';
   }
+}
 });
 
 // 新規登録ビュー: 登録処理
@@ -1474,3 +1492,12 @@ confirmDetailAddBtn.onclick = async () => {
       });
   });
 };
+
+
+// 初期表示で未ログインメッセージを表示（onAuthStateChangedが来るまでの保険）
+window.addEventListener('DOMContentLoaded', () => {
+  try {
+    const bar = ensureStatusBar();
+    if (bar) bar.textContent = 'ログインしてください';
+  } catch (_) {}
+});
