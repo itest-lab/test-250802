@@ -177,14 +177,13 @@ async function startScanning(formats, inputId) {
     }
   };
   try {
-      await html5QrCode.start(constraints, config, onSuccess, () => {});
-} catch (e) {
-  console.error(e);
-  alert('カメラ起動に失敗しました');
-  stopScanning();
-  return false;
-}
-// フォーカス動作: プレビュー領域をタップでオートフォーカス
+    await html5QrCode.start(constraints, config, onSuccess, () => {});
+  } catch (e) {
+    console.error(e);
+    alert('カメラ起動に失敗しました');
+    stopScanning();
+  }
+  // フォーカス動作: プレビュー領域をタップでオートフォーカス
   const videoContainer = document.getElementById('video-container');
   if (videoContainer) {
     videoContainer.addEventListener('click', async () => {
@@ -230,6 +229,7 @@ async function toggleTorch() {
 
 // DOMContentLoaded 時にカメラ関連 UI を初期化
 window.addEventListener('DOMContentLoaded', () => {
+  try { const el = document.getElementById('login-status-container'); if (el) el.textContent = 'ログインしてください'; } catch(_) {}
   // オーバーレイのボタンにイベントを紐付け
   const closeBtn = document.getElementById('close-button');
   if (closeBtn) {
@@ -243,22 +243,46 @@ window.addEventListener('DOMContentLoaded', () => {
       toggleTorch();
     });
   }
-  // 案件追加用カメラボタン
-  const caseCameraBtn = document.getElementById('case-camera-btn');
-  if (caseCameraBtn) {
-    if (isMobileDevice()) {
-      caseCameraBtn.style.display = 'block';
-      caseCameraBtn.addEventListener('click', () => {
-        // QR/PDF417 を対象とする
-        startScanning([
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.PDF_417
-        ], 'case-barcode');
-      });
-    } else {
-      // PC では非表示
-      caseCameraBtn.style.display = 'none';
+            // 案件追加用カメラボタン
+const caseCameraBtn = document.getElementById('case-camera-btn');
+if (caseCameraBtn) {
+  const fileInputTop = document.createElement('input');
+  fileInputTop.type = 'file';
+  fileInputTop.accept = 'image/*,application/pdf';
+  fileInputTop.style.display = 'block';
+  fileInputTop.addEventListener('change', async (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    try {
+      const v = await scanFileForCodes(f);
+      if (!v) { alert('PDF/画像から PDF417/CODABAR を検出できませんでした'); return; }
+      caseBarcodeInput.value = v;
+      // 入力イベント & Enter 送信（既存のEnterハンドラで展開）
+      caseBarcodeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      caseBarcodeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    } catch (e) {
+      alert('ファイル読み取り失敗: ' + e.message);
+    } finally {
+      ev.target.value = '';
     }
+  });
+
+  const canCamera = isMobileDevice() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  if (canCamera) {
+    caseCameraBtn.style.display = 'block';
+    caseCameraBtn.addEventListener('click', () => {
+      // QR/PDF417 を対象とする
+      startScanning([
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.PDF_417
+      ], 'case-barcode');
+    });
+    // 併設のファイル選択（任意）
+    caseCameraBtn.insertAdjacentElement('afterend', fileInputTop);
+  } else {
+    // PC（またはカメラ不可端末）はカメラの代わりにファイル選択
+    caseCameraBtn.style.display = 'none';
+    caseCameraBtn.insertAdjacentElement('afterend', fileInputTop);
   }
 });
 
@@ -355,23 +379,9 @@ const anotherCaseBtn2       = document.getElementById("another-case-btn-2");
 // --- セッションタイムスタンプ管理 ---
 // 10分以内のリロードはセッション維持する
 const SESSION_LIMIT_MS = 10 * 60 * 1000;
-
-/* --- セーフティ: markLoginTime/isSessionExpired が未定義なら定義 --- */
-if (typeof window.markLoginTime !== 'function') {
-  window.markLoginTime = function() {
-    try { localStorage.setItem('loginTime', String(Date.now())); } catch (_) {}
-  };
+function clearLoginTime() {
+  localStorage.removeItem('loginTime');
 }
-if (typeof window.isSessionExpired !== 'function') {
-  window.isSessionExpired = function() {
-    try {
-      const ts = parseInt(localStorage.getItem('loginTime') || '0', 10);
-      if (!ts) return false;
-      return (Date.now() - ts) > (typeof SESSION_LIMIT_MS !== 'undefined' ? SESSION_LIMIT_MS : 10*60*1000);
-    } catch (_) { return false; }
-  };
-}
-function clearLoginTime(){ try{ localStorage.removeItem('loginTime'); }catch(_){} }
 function markLoginTime() {
   localStorage.setItem('loginTime', Date.now().toString());
 }
@@ -381,7 +391,7 @@ function isSessionExpired() {
 }
 
 // ページ読み込み時にセッション期限切れならサインアウト
-if (auth && auth.currentUser && isSessionExpired()) {
+if (isSessionExpired()) {
   auth.signOut().catch(err => {
     console.warn("セッションタイムアウト時サインアウト失敗:", err);
   });
@@ -418,8 +428,7 @@ if(loginView.style.display !== "none"){
 // --- 認証監視 ---
 auth.onAuthStateChanged(async user => {
   if (user) {
-    
-      try { markLoginTime(); } catch (e) {}try {
+    try {
       // Realtime DB の admins/{uid} が true なら管理者扱い
       const snap = await db.ref(`admins/${user.uid}`).once("value");
       isAdmin = snap.val() === true;
@@ -491,42 +500,22 @@ logoutBtn.onclick = async () => {
   // セッションタイムスタンプ削除
   clearLoginTime();
   // localStorage をまるごとクリア
-  try { localStorage.clear(); } catch(_) {}
+  localStorage.clear();
 };
 
-
-function ensureStatusBar(){
-  let el = document.getElementById('login-status-container');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'login-status-container';
-    el.style.position = 'fixed';
-    el.style.left = '0';
-    el.style.right = '0';
-    el.style.bottom = '0';
-    el.style.padding = '8px 12px';
-    el.style.fontSize = '14px';
-    el.style.background = '#f0f4ff';
-    el.style.borderTop = '1px solid #cdd7ff';
-    el.style.color = '#334';
-    el.style.zIndex = '2147483647';
-    el.style.textAlign = 'center';
-    document.body.appendChild(el);
-  }
-  return el;
-}
 // ログイン状態が変わったときに呼ばれるリスナー
-
 auth.onAuthStateChanged(user => {
-  const statusContainer = ensureStatusBar();
-  if (!statusContainer) return;
-  statusContainer.textContent = '';
+  const statusContainer = document.getElementById('login-status-container');
+  statusContainer.textContent = '';  // まずクリア
+
   if (user) {
-    statusContainer.textContent = `${user.email || 'ログイン中'} でログイン中`;
+    // ログイン中
+    // user.email や user.uid など好きな情報を表示できます
+    statusContainer.textContent = `${user.email} でログイン中`;
   } else {
+    // 未ログイン時はなにも表示しない or 別文言を出してもOK
     statusContainer.textContent = 'ログインしてください';
   }
-}
 });
 
 // 新規登録ビュー: 登録処理
@@ -650,10 +639,9 @@ function createTrackingRow(context="add"){
   });
   row.appendChild(inp);
 
-  // --- カメラ／ファイル入力（端末別） ---
-// PC（またはスマホでもカメラが使えない場合）は「ファイルを選択」
-// スマホでカメラが使える場合は「カメラ起動」ボタン（失敗時は自動でファイル選択にフォールバック）
+  // --- カメラ／ファイル選択（端末別） ---
   (function attachCaptureControls(){
+    // 画像/PDF用のファイル選択
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/*,application/pdf';
@@ -663,41 +651,37 @@ function createTrackingRow(context="add"){
       const f = ev.target.files && ev.target.files[0];
       if (!f) return;
       try {
-        await scanFileForCodes(f, uniqueId);
+        const value = await scanFileForCodes(f);
+        if (!value) { alert('PDF/画像から PDF417/CODABAR を検出できませんでした'); return; }
+        inp.value = value;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       } catch (e) {
         console.error('ファイル解析エラー:', e);
         alert('ファイルからの読み取りに失敗しました');
       } finally {
-        // 同じファイルを再選択できるよう値をクリア
         ev.target.value = '';
       }
     });
 
-    // スマホ判定
-    if (isMobileDevice()) {
+    const canCamera = isMobileDevice() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    if (canCamera) {
       const camBtn = document.createElement('button');
       camBtn.type = 'button';
       camBtn.textContent = 'カメラ起動';
       camBtn.className = 'camera-btn';
-      camBtn.style.marginLeft = '8px';
       camBtn.addEventListener('click', async () => {
-        // CODABAR を対象にスキャン開始（失敗時はファイル選択へ）
-        const ok = await startScanning([Html5QrcodeSupportedFormats.CODABAR], uniqueId).catch(()=>false);
-        if (!ok) {
-          // カメラ不可 → ファイル選択を表示して自動で開く
-          camBtn.remove();
-          row.appendChild(fileInput);
-          fileInput.click();
-        }
+        startScanning([Html5QrcodeSupportedFormats.CODABAR], uniqueId);
       });
       row.appendChild(camBtn);
+      // 親切としてファイル選択も併設（カメラ不可時の回避）
+      row.appendChild(fileInput);
     } else {
-      // PC はファイル選択のみ
+      // PC やカメラ非対応端末はファイル選択のみ
       row.appendChild(fileInput);
     }
   })();
-
-  // リアルタイムで運送会社未選択行を強調する
+// リアルタイムで運送会社未選択行を強調する
   function updateMissingHighlight() {
     // 追跡番号が入力されているか？
     const tnVal = inp.value.trim();
@@ -1178,37 +1162,9 @@ function start1DScanner(inputId) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 画像／PDF から PDF417・CODABAR を抽出（ファイル選択用）
 // ─────────────────────────────────────────────────────────────────
-async function scanFileForCodes(file, inputId) {
-  // できるだけ広い互換性のため、優先順：BarcodeDetector → Html5Qrcode（画像のみ） → 失敗
-  const type = (file.type || '').toLowerCase();
-  if (type.includes('pdf')) {
-    const value = await decodeFromPdf(file);
-    if (!value) throw new Error('PDF 内に PDF417/CODABAR が見つかりませんでした');
-    applyDecodedToInput(value, inputId);
-    return true;
-  } else {
-    const value = await decodeFromImage(file);
-    if (!value) throw new Error('画像内に PDF417/CODABAR が見つかりませんでした');
-    applyDecodedToInput(value, inputId);
-    return true;
-  }
-}
-
-function applyDecodedToInput(decoded, inputId) {
-  const inputEl = document.getElementById(inputId);
-  if (!inputEl) return;
-  // CODABAR の start/stop(A/B/C/D) を除去
-  const norm = normalizeCodabar(decoded);
-  inputEl.value = norm;
-  // 値変更イベント
-  inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-  // Enter を送信して既存処理を発火
-  const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-  inputEl.dispatchEvent(enterEv);
-}
-
+// 画像／PDF から PDF417・CODABAR を抽出（PCやカメラ非対応端末向け）
+// ─────────────────────────────────────────────────────────────────
 function normalizeCodabar(value) {
   if (!value || value.length < 2) return value || '';
   const pre = value[0], suf = value[value.length - 1];
@@ -1218,36 +1174,33 @@ function normalizeCodabar(value) {
   return value;
 }
 
-async function decodeFromImage(file) {
-  // 1) BarcodeDetector があればそれで検出
-  if ('BarcodeDetector' in window) {
-    try {
-      const det = new BarcodeDetector({ formats: ['pdf417','codabar'] });
-      const bitmap = await createImageBitmap(file);
-      const results = await det.detect(bitmap);
-      if (results && results.length) {
-        // 1つめを採用
-        return results[0].rawValue || results[0].rawValue || '';
-      }
-    } catch (e) {
-      console.warn('BarcodeDetector 失敗:', e);
+async function decodeWithBarcodeDetectorFromBitmap(bitmap){
+  if (!('BarcodeDetector' in window)) return null;
+  try {
+    const det = new BarcodeDetector({ formats: ['pdf417','codabar'] });
+    const results = await det.detect(bitmap);
+    if (results && results.length) {
+      return results[0].rawValue || results[0].rawValue || '';
     }
-  }
-  // 2) Html5Qrcode の scanFile を利用（画像のみ対応）
+  } catch (_) {}
+  return null;
+}
+
+async function decodeFromImage(fileOrBlob){
+  try {
+    const bmp = await createImageBitmap(fileOrBlob);
+    const v = await decodeWithBarcodeDetectorFromBitmap(bmp);
+    if (v) return v;
+  } catch (_) {}
   if (window.Html5Qrcode) {
     const tmpId = 'file-decode-' + Date.now();
-    const div = document.createElement('div');
-    div.id = tmpId;
-    div.style.display = 'none';
+    const div = document.createElement('div'); div.id = tmpId; div.style.display='none';
     document.body.appendChild(div);
     const h5 = new Html5Qrcode(tmpId, false);
     try {
-      const result = await h5.scanFile(file, false);
-      // scanFile は多くのフォーマットを返すので、そのまま返却
+      const result = await h5.scanFile(fileOrBlob, false);
       return result;
-    } catch (e) {
-      console.warn('Html5Qrcode.scanFile 失敗:', e);
-    } finally {
+    } catch (_) {} finally {
       try { await h5.clear(); } catch (_) {}
       div.remove();
     }
@@ -1264,17 +1217,15 @@ async function ensurePdfJsLoaded() {
     s.onerror = () => reject(new Error('pdf.js の読み込みに失敗'));
     document.head.appendChild(s);
   });
-  // ワーカー設定
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 }
 
-async function decodeFromPdf(file) {
+async function decodeFromPdf(file){
   await ensurePdfJsLoaded();
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  // 各ページを順にレンダリングして検出
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const viewport = page.getViewport({ scale: 2 });
@@ -1285,44 +1236,53 @@ async function decodeFromPdf(file) {
     await page.render({ canvasContext: ctx, viewport }).promise;
     const blob = await new Promise(res => canvas.toBlob(res));
     if (!blob) continue;
-    // 画像化して検出
-    const val = await decodeFromImage(blob);
-    if (val) return val;
+    const v = await decodeFromImage(blob);
+    if (v) return v;
   }
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────────
+async function scanFileForCodes(file){
+  const type = (file.type || '').toLowerCase();
+  let v = null;
+  if (type.includes('pdf')) {
+    v = await decodeFromPdf(file);
+  } else {
+    v = await decodeFromImage(file);
+  }
+  if (!v) return null;
+  return normalizeCodabar(String(v));
+}
+
 // ５）セッションタイムアウト（10分）
 // ─────────────────────────────────────────────────────────────────
 function resetSessionTimer() {
-  // ★操作があったので loginTime を更新（スライディング期限）
-  try { markLoginTime(); } catch (_) {}
+  // 操作があったので loginTime を更新（スライディング期限）
+  try { markLoginTime(); } catch (e) {}
   clearTimeout(sessionTimer);
   sessionTimer = setTimeout(() => {
     alert('セッションが10分を超えました。再度ログインしてください。');
-    auth.signOut().catch(()=>{});
-    // メール・パスワード欄をクリア
-    if (typeof emailInput !== 'undefined') emailInput.value = "";
-    if (typeof passwordInput !== 'undefined') passwordInput.value = "";
-    // セッション情報の破棄
-    try { localStorage.removeItem('loginTime'); } catch (_) {}
+    try {
+      if (auth && auth.currentUser) auth.signOut();
+    } catch (_) {}
+    // 入力欄をクリア（存在しない場合は無視）
+    try { document.getElementById('email').value = ""; } catch(_) {}
+    try { document.getElementById('password').value = ""; } catch(_) {}
   }, SESSION_LIMIT_MS);
-}, SESSION_LIMIT_MS);
+}
+, SESSION_LIMIT_MS);
 }
 function startSessionTimer() {
   resetSessionTimer();
-  // クリック、キー入力、タッチ、テキスト入力/変更 などでタイマーと loginTime を更新
   const _events = ['click','keydown','touchstart','input','change'];
-  _events.forEach(evt => {
-    // capture=true で早めに拾う
-    document.addEventListener(evt, resetSessionTimer, true);
-  });
-  // 定期的に loginTime を監視し、10分超過で強制ログアウト（バックグラウンド放置対策）
+  _events.forEach(evt => document.addEventListener(evt, resetSessionTimer, true));
+  // バックグラウンドでの期限超過も検出
   if (!window.__inactivityInterval) {
     window.__inactivityInterval = setInterval(() => {
       try {
-        if (auth && auth.currentUser && isSessionExpired()) {
+        const expired = isSessionExpired();
+        if (expired && auth && auth.currentUser) {
+          alert('セッションが10分を超えました。再度ログインしてください。');
           auth.signOut().catch(()=>{});
           clearInterval(window.__inactivityInterval);
           window.__inactivityInterval = null;
@@ -1331,7 +1291,6 @@ function startSessionTimer() {
     }, 30 * 1000);
   }
 }
-
 // ─────────────────────────────────────────────────────────────────
 // 詳細画面：追跡番号追加フォーム操作
 // ─────────────────────────────────────────────────────────────────
@@ -1492,12 +1451,3 @@ confirmDetailAddBtn.onclick = async () => {
       });
   });
 };
-
-
-// 初期表示で未ログインメッセージを表示（onAuthStateChangedが来るまでの保険）
-window.addEventListener('DOMContentLoaded', () => {
-  try {
-    const bar = ensureStatusBar();
-    if (bar) bar.textContent = 'ログインしてください';
-  } catch (_) {}
-});
