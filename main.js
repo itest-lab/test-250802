@@ -355,6 +355,22 @@ const anotherCaseBtn2       = document.getElementById("another-case-btn-2");
 // --- セッションタイムスタンプ管理 ---
 // 10分以内のリロードはセッション維持する
 const SESSION_LIMIT_MS = 10 * 60 * 1000;
+
+/* --- セーフティ: markLoginTime/isSessionExpired が未定義なら定義 --- */
+if (typeof window.markLoginTime !== 'function') {
+  window.markLoginTime = function() {
+    try { localStorage.setItem('loginTime', String(Date.now())); } catch (_) {}
+  };
+}
+if (typeof window.isSessionExpired !== 'function') {
+  window.isSessionExpired = function() {
+    try {
+      const ts = parseInt(localStorage.getItem('loginTime') || '0', 10);
+      if (!ts) return false;
+      return (Date.now() - ts) > (typeof SESSION_LIMIT_MS !== 'undefined' ? SESSION_LIMIT_MS : 10*60*1000);
+    } catch (_) { return false; }
+  };
+}
 function clearLoginTime() {
   localStorage.removeItem('loginTime');
 }
@@ -367,7 +383,7 @@ function isSessionExpired() {
 }
 
 // ページ読み込み時にセッション期限切れならサインアウト
-if (isSessionExpired()) {
+if (auth && auth.currentUser && isSessionExpired()) {
   auth.signOut().catch(err => {
     console.warn("セッションタイムアウト時サインアウト失敗:", err);
   });
@@ -404,7 +420,8 @@ if(loginView.style.display !== "none"){
 // --- 認証監視 ---
 auth.onAuthStateChanged(async user => {
   if (user) {
-    try {
+    
+      try { markLoginTime(); } catch (e) {}try {
       // Realtime DB の admins/{uid} が true なら管理者扱い
       const snap = await db.ref(`admins/${user.uid}`).once("value");
       isAdmin = snap.val() === true;
@@ -1287,7 +1304,7 @@ function startSessionTimer() {
   if (!window.__inactivityInterval) {
     window.__inactivityInterval = setInterval(() => {
       try {
-        if (isSessionExpired()) {
+        if (auth && auth.currentUser && isSessionExpired()) {
           auth.signOut().catch(()=>{});
           clearInterval(window.__inactivityInterval);
           window.__inactivityInterval = null;
