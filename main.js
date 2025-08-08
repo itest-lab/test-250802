@@ -166,7 +166,7 @@ async function choosePreferredBackCameraId() {
 // html5-qrcode ランタイム
 let html5QrCode = null;
 let scanningInputId = null;
-let currentFormats = null; // 今のスキャン対象フォーマット（QR or CODABAR）
+let currentFormats = null; // 今のスキャン対象フォーマット（QR/PDF417 or CODABAR）
 let torchOn = false;
 
 // --- カメラ起動（スマホのみ）。案件追加は QR/PDF417、追跡は CODABAR を想定
@@ -227,7 +227,7 @@ async function startScanning(formats, inputId) {
         if (decoded.startsWith("ZLIB64:")) {
           const b64 = decoded.slice(7);
           const bin = atob(b64);
-          const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
+          const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)]);
           const dec = pako.inflate(arr);
           decoded = new TextDecoder().decode(dec).trim().replace(/「[^」]*」/g, "");
         }
@@ -305,129 +305,6 @@ async function startScanning(formats, inputId) {
   }
 }
 
-  scanningInputId = inputId;
-  currentFormats  = formats;
-
-  // オーバーレイ（9:16枠、上下左右 5mm 余白）
-  const margin = mmToPx(5) * 2;
-  const vw = window.innerWidth, vh = window.innerHeight, ratio = 9 / 16;
-  let w = vw - margin, h = vh - margin;
-  if (w / h > ratio) w = h * ratio; else h = w / ratio;
-  const sc = document.getElementById("scanner-container");
-  if (sc) { sc.style.width = `${w}px`; sc.style.height = `${h}px`; }
-  const overlay = document.getElementById("scanner-overlay");
-  if (overlay) { overlay.style.display = "flex"; document.body.style.overflow = "hidden"; }
-
-  // 初期化
-  html5QrCode = new Html5Qrcode("video-container", false);
-
-  // レンズ選択（最小倍率優先のヒューリスティック）
-  const deviceId = await choosePreferredBackCameraId();
-  const constraints = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { exact: "environment" } };
-
-  const config = {
-    fps: 10,
-    formatsToSupport: formats, // 例： [Html5QrcodeSupportedFormats.QR_CODE] / [Html5QrcodeSupportedFormats.CODABAR]
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-    useBarCodeDetectorIfSupported: true
-  };
-
-  const onDecode = decoded => {
-    const inputEl = document.getElementById(scanningInputId);
-    if (!inputEl) { stopScanning(); return; }
-    try {
-      let out = decoded || "";
-
-      if (currentFormats && currentFormats.length === 1 &&
-          currentFormats[0] === Html5QrcodeSupportedFormats.CODABAR) {
-        // CODABAR：先頭末尾 A/B/C/D を削除
-        if (out.length >= 2) {
-          const pre = out[0], suf = out[out.length - 1];
-          if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) out = out.substring(1, out.length - 1);
-        }
-      } else {
-        // QR：ZLIB64展開
-        if (out.startsWith("ZLIB64:")) {
-          const b64 = out.slice(7);
-          const bin = atob(b64);
-          const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
-          const dec = pako.inflate(arr);
-          out = new TextDecoder().decode(dec).trim().replace(/「[^」]*」/g, "");
-        }
-      }
-
-      inputEl.value = out;
-      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
-      inputEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      stopScanning();
-    } catch (e) {
-      console.error("デコード後処理に失敗:", e);
-      stopScanning();
-    }
-  };
-
-  try {
-    await html5QrCode.start(constraints, config, onDecode, () => {});
-    // ズーム能力があるなら最小ズーム（=最小倍率・最広角）に寄せる
-    try {
-      const track = html5QrCode.getRunningTrack();
-      const caps = track.getCapabilities?.();
-      if (caps && typeof caps.zoom !== "undefined") {
-        const min = caps.zoom.min ?? caps.zoom?.min ?? 1;
-        const step = caps.zoom.step ?? 0;
-        const next = step ? Math.min(min + step, caps.zoom.max ?? min) : min;
-        // ここで「最小か次に大きい」どちらか。最小を基準に適用（必要なら next に変更）
-        await html5QrCode.applyVideoConstraints({ advanced: [{ zoom: min }] });
-      }
-    } catch (_) {}
-  } catch (e) {
-    console.error("カメラ起動失敗:", e);
-    alert("カメラ起動に失敗しました");
-    stopScanning();
-  }
-
-  // プレビュー下に「ファイルを読み込み」ボタンを設置（毎回再生成しないように一度だけ）
-  const scn = document.getElementById("scanner-container");
-  if (scn && !document.getElementById("overlay-file-import-btn")) {
-    const importBtn = document.createElement("button");
-    importBtn.id = "overlay-file-import-btn";
-    importBtn.className = "overlay-btn";
-    importBtn.style.top = "auto";
-    importBtn.style.bottom = "12px";
-    importBtn.style.left = "12px";
-    importBtn.textContent = "ファイルを読み込み";
-    scn.appendChild(importBtn);
-
-    importBtn.addEventListener("click", () => {
-      const fi = document.createElement("input");
-      fi.type = "file";
-      fi.accept = "image/*";          // 撮影画像を想定
-      fi.capture = "environment";     // 背面カメラでの撮影を促す（対応端末のみ）
-      fi.onchange = e => {
-        const f = e.target.files && e.target.files[0];
-        if (!f) return;
-        // ライブスキャンは止めてからファイルスキャン
-        const isQR = currentFormats && currentFormats[0] === Html5QrcodeSupportedFormats.QR_CODE;
-        const isCodabar = currentFormats && currentFormats[0] === Html5QrcodeSupportedFormats.CODABAR;
-        // QR限定 or CODABAR限定 で厳格に読み込む
-        scanFileForInputStrict(f, scanningInputId, { forQR: !!isQR, forCodabar: !!isCodabar });
-        // オーバーレイは任意で閉じる（ここでは残してもOKだが、一旦閉じる）
-        stopScanning();
-      };
-      fi.click();
-    });
-  }
-
-  // プレビュー領域タップでAF（端末対応次第）
-  const videoContainer = document.getElementById("video-container");
-  if (videoContainer) {
-    videoContainer.addEventListener("click", async () => {
-      if (!html5QrCode) return;
-      try { await html5QrCode.applyVideoConstraints({ advanced: [{ focusMode: "single-shot" }] }); } catch (_) {}
-    });
-  }
-}
-
 // スキャン停止（オーバーレイも閉じる）
 async function stopScanning() {
   if (html5QrCode) {
@@ -444,7 +321,7 @@ async function stopScanning() {
 async function toggleTorch() {
   if (!html5QrCode) return;
   try {
-    const settings = html5QrCode.getRunningTrackSettings();
+    const settings = html5QrCode.getRunningTrackSettings?.() || {};
     if (!("torch" in settings)) {
       alert("ライトに対応していません");
       return;
@@ -456,7 +333,7 @@ async function toggleTorch() {
   }
 }
 
-// DOMContentLoaded 内の案件追加ボタン初期化部分を置換
+// DOMContentLoaded 内の案件追加ボタン初期化部分
 window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("close-button")?.addEventListener("click", stopScanning);
   document.getElementById("torch-button")?.addEventListener("click", toggleTorch);
@@ -968,7 +845,7 @@ document.getElementById("case-barcode").addEventListener("keydown", e => {
     if (raw.startsWith("ZLIB64:")) {
       const b64 = raw.slice(7);
       const bin = atob(b64);
-      const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
+      const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)]);
       const dec = pako.inflate(arr);
       text = new TextDecoder().decode(dec);
     } else {
