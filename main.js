@@ -57,10 +57,13 @@ function canUseCamera() {
          !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function");
 }
 
-// ファイルからQR/CODABARを読み取り、指定inputに反映
-// - forQR=true なら QR のみ許可（formatが取得できてQR以外なら弾く）
-// - forCodabar=true なら CODABAR として先頭末尾 A/B/C/D を除去
-async function scanFileForInputStrict(file, inputId, { forQR = false, forCodabar = false } = {}) {
+// --- ファイルから厳格に読み取り（allowedFormats: ["QR_CODE"] など） ---
+// postprocess: "QR" なら (formatName==="QR_CODE" の場合のみ) ZLIB64展開
+//              "CODABAR" なら 先頭末尾 A/B/C/D 除去
+async function scanFileForInputStrict(file, inputId, {
+  allowedFormats = null,   // 例: ["QR_CODE","PDF_417"] / ["CODABAR"]
+  postprocess = null       // "QR" / "CODABAR" / null
+} = {}) {
   const TMP_ID = "file-scan-temp-container";
   let host = document.getElementById(TMP_ID);
   if (!host) {
@@ -70,41 +73,40 @@ async function scanFileForInputStrict(file, inputId, { forQR = false, forCodabar
     document.body.appendChild(host);
   }
   const scanner = new Html5Qrcode(TMP_ID);
+
   try {
-    // showImage=true で詳細を含む結果（decodedText, result.format 等）を期待
+    // true で詳細結果（formatName 等）を取得
     const res = await scanner.scanFile(file, true);
-    // 互換性のため res が文字列の場合も考慮
-    const decodedText = typeof res === "string" ? res : res.decodedText;
-    const formatName  = (res && res.result && res.result.format && res.result.format.formatName) ? res.result.format.formatName : null;
+    const decodedRaw = typeof res === "string" ? res : res.decodedText;
+    const formatName = (res && res.result && res.result.format && res.result.format.formatName)
+      ? res.result.format.formatName : null;
 
-    if (!decodedText) throw new Error("デコード結果なし");
+    if (!decodedRaw) throw new Error("デコード結果なし");
 
-    // QR限定チェック
-    if (forQR) {
-      if (formatName && formatName !== "QR_CODE") {
-        alert("QRコードのみ対応です（選択された画像は QR ではありません）。");
-        return;
-      }
+    // 許可フォーマット厳格チェック（formatName が取れない環境ではスキップ）
+    if (allowedFormats && formatName && !allowedFormats.includes(formatName)) {
+      alert(`この画面では ${allowedFormats.join(" / ")} のみ対応です（選択は ${formatName || "不明"}）。`);
+      return;
     }
 
-    let decoded = decodedText;
+    let decoded = decodedRaw;
 
-    if (forCodabar) {
-      // CODABAR：先頭末尾 A/B/C/D 除去
-      if (decoded.length >= 2) {
-        const pre = decoded[0], suf = decoded[decoded.length - 1];
-        if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
-          decoded = decoded.substring(1, decoded.length - 1);
-        }
-      }
-    } else if (forQR) {
-      // QR想定：ZLIB64展開を優先
+    if (postprocess === "QR" && formatName === "QR_CODE") {
+      // QR のときだけ ZLIB64 展開
       if (decoded.startsWith("ZLIB64:")) {
         const b64 = decoded.slice(7);
         const bin = atob(b64);
         const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
         const dec = pako.inflate(arr);
         decoded = new TextDecoder().decode(dec).trim().replace(/「[^」]*」/g, "");
+      }
+    } else if (postprocess === "CODABAR") {
+      // CODABAR：先頭/末尾 A/B/C/D を除去
+      if (decoded.length >= 2) {
+        const pre = decoded[0], suf = decoded[decoded.length - 1];
+        if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
+          decoded = decoded.substring(1, decoded.length - 1);
+        }
       }
     }
 
@@ -125,21 +127,34 @@ async function scanFileForInputStrict(file, inputId, { forQR = false, forCodabar
 // ミリメートル→ピクセル（プレビューの外枠計算）
 function mmToPx(mm) { return mm * (96 / 25.4); }
 
-// 背面カメラから「最小倍率（超広角）」優先→次（広角）→それ以外→末尾から2番目→1番目の順で選択
+// --- レンズ選択：広角(次に倍率が高い) → 超広角(最小倍率) → その他
+//     判別不能時は「末尾から二番目」→「先頭」でフォールバック
 async function choosePreferredBackCameraId() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const backs = devices.filter(d => d.kind === "videoinput" && /back|rear|environment/i.test(d.label));
     if (backs.length === 0) return null;
 
-    // ラベルからレンズ種別を推定（端末によってラベルはバラつくためヒューリスティック）
-    const ultraIdx = backs.findIndex(d => /ultra|0\.5x|超広角|ultra[- ]?wide/i.test(d.label));
-    const wideIdx  = backs.findIndex(d => /wide|1\.0x|標準/i.test(d.label));
+    const norm = s => (s || "").toLowerCase();
 
-    if (ultraIdx !== -1) return backs[ultraIdx].deviceId;    // 最小倍率（超広角）
-    if (wideIdx  !== -1) return backs[wideIdx].deviceId;     // 次に大きい（広角）
+    // 「超広角」を先に除外したうえで「広角」を最優先
+    const ultraIndex = backs.findIndex(d => {
+      const l = norm(d.label);
+      return /ultra[\s-]?wide|超広角|^0\.5x$| 0\.5x|0\.5x|0,5x/.test(l) || (l.includes("ultra") && l.includes("wide"));
+    });
 
-    // ラベルで判定できない場合：レンズが2本以上なら末尾から2番目（=比較的広角寄り）→ダメなら先頭
+    const wideIndex = backs.findIndex(d => {
+      const l = norm(d.label);
+      // ultra を含む "ultra-wide" は除外し、1x / wide / wide-angle / 標準 などを拾う
+      return !l.includes("ultra") && (/\bwide(?!-?macro)\b/.test(l) || /\bwide-?angle\b/.test(l) || /\b1(\.0)?x\b/.test(l) || l.includes("標準"));
+    });
+
+    // 今回の仕様：最初に広角を狙う
+    if (wideIndex !== -1) return backs[wideIndex].deviceId;
+    // 広角が無ければ超広角
+    if (ultraIndex !== -1) return backs[ultraIndex].deviceId;
+
+    // どれでもない場合：末尾から二番目（比較的広角寄りのことが多い）→1本だけならそれ
     if (backs.length >= 2) return backs[backs.length - 2].deviceId;
     return backs[0].deviceId;
   } catch (e) {
@@ -154,17 +169,142 @@ let scanningInputId = null;
 let currentFormats = null; // 今のスキャン対象フォーマット（QR or CODABAR）
 let torchOn = false;
 
-// ライブカメラでスキャン開始（スマホのみ）
+// --- カメラ起動（スマホのみ）。案件追加は QR/PDF417、追跡は CODABAR を想定
 async function startScanning(formats, inputId) {
   if (!canUseCamera()) {
     alert("このデバイスではカメラ機能は使用できません（スマホのみ）");
     return;
   }
-  // 二重起動を防止
+  // 二重起動回避
   if (html5QrCode) {
     try { await html5QrCode.stop(); html5QrCode.clear(); } catch (_) {}
     html5QrCode = null;
   }
+  scanningInputId = inputId;
+  currentFormats  = formats;
+
+  // オーバーレイ 9:16
+  const margin = mmToPx(5) * 2;
+  const vw = window.innerWidth, vh = window.innerHeight, ratio = 9/16;
+  let w = vw - margin, h = vh - margin;
+  if (w / h > ratio) w = h * ratio; else h = w / ratio;
+  const sc = document.getElementById("scanner-container");
+  if (sc) { sc.style.width = `${w}px`; sc.style.height = `${h}px`; }
+  const overlay = document.getElementById("scanner-overlay");
+  if (overlay) { overlay.style.display = "flex"; document.body.style.overflow = "hidden"; }
+
+  html5QrCode = new Html5Qrcode("video-container", false);
+
+  // ★ここでレンズ選択：広角優先→超広角→フォールバック
+  const deviceId = await choosePreferredBackCameraId();
+  const constraints = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { exact: "environment" } };
+
+  const config = {
+    fps: 10,
+    formatsToSupport: formats, // 例) [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.PDF_417]
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    useBarCodeDetectorIfSupported: true
+  };
+
+  // 成功時：第二引数 decodedResult から formatName を取得
+  const onDecode = (decodedRaw, decodedResult) => {
+    const inputEl = document.getElementById(scanningInputId);
+    if (!inputEl) { stopScanning(); return; }
+    try {
+      const formatName = decodedResult?.result?.format?.formatName || null;
+      let decoded = decodedRaw || "";
+
+      if (formatName === "CODABAR") {
+        // CODABAR：先頭/末尾 A/B/C/D を削除
+        if (decoded.length >= 2) {
+          const pre = decoded[0], suf = decoded[decoded.length - 1];
+          if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
+            decoded = decoded.substring(1, decoded.length - 1);
+          }
+        }
+      } else if (formatName === "QR_CODE") {
+        // QR：案件追加の可能性が高いので ZLIB64 展開に対応
+        if (decoded.startsWith("ZLIB64:")) {
+          const b64 = decoded.slice(7);
+          const bin = atob(b64);
+          const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
+          const dec = pako.inflate(arr);
+          decoded = new TextDecoder().decode(dec).trim().replace(/「[^」]*」/g, "");
+        }
+      }
+      // PDF_417 はそのまま
+
+      inputEl.value = decoded;
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      stopScanning();
+    } catch (e) {
+      console.error("デコード後処理エラー:", e);
+      stopScanning();
+    }
+  };
+
+  try {
+    await html5QrCode.start(constraints, config, onDecode, () => {});
+    // ★ズーム最小（端末対応時）
+    try {
+      const track = html5QrCode.getRunningTrack?.();
+      const caps  = track?.getCapabilities?.();
+      if (caps && typeof caps.zoom !== "undefined") {
+        const min = (typeof caps.zoom === "object" ? caps.zoom.min : 1) ?? 1;
+        await html5QrCode.applyVideoConstraints({ advanced: [{ zoom: min }] });
+      }
+    } catch (_) {}
+  } catch (e) {
+    console.error("カメラ起動失敗:", e);
+    alert("カメラ起動に失敗しました");
+    stopScanning();
+  }
+
+  // ▼プレビュー下の「ファイルを読み込み」ボタン（毎回ハンドラ更新）
+  const container = document.getElementById("scanner-container");
+  let importBtn = document.getElementById("overlay-file-import-btn");
+  if (!importBtn) {
+    importBtn = document.createElement("button");
+    importBtn.id = "overlay-file-import-btn";
+    importBtn.className = "overlay-btn";
+    importBtn.style.top = "auto";
+    importBtn.style.bottom = "12px";
+    importBtn.style.left = "12px";
+    importBtn.textContent = "ファイルを読み込み";
+    container.appendChild(importBtn);
+  }
+  importBtn.onclick = () => {
+    const fi = document.createElement("input");
+    fi.type = "file";
+    fi.accept = "image/*";
+    fi.capture = "environment";
+    fi.onchange = e => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+
+      // 現在のスキャン文脈に応じて許容フォーマットを切替
+      if (currentFormats.some(fm => fm === Html5QrcodeSupportedFormats.QR_CODE || fm === Html5QrcodeSupportedFormats.PDF_417)) {
+        // 案件追加：QR と PDF417 を許可（QR の時だけ ZLIB64 展開）
+        scanFileForInputStrict(f, scanningInputId, { allowedFormats: ["QR_CODE","PDF_417"], postprocess: "QR" });
+      } else {
+        // 追跡番号：CODABAR 限定
+        scanFileForInputStrict(f, scanningInputId, { allowedFormats: ["CODABAR"], postprocess: "CODABAR" });
+      }
+      stopScanning();
+    };
+    fi.click();
+  };
+
+  // プレビュータップで AF（端末依存）
+  const videoContainer = document.getElementById("video-container");
+  if (videoContainer) {
+    videoContainer.addEventListener("click", async () => {
+      try { await html5QrCode.applyVideoConstraints({ advanced: [{ focusMode: "single-shot" }] }); } catch (_) {}
+    });
+  }
+}
+
   scanningInputId = inputId;
   currentFormats  = formats;
 
@@ -316,33 +456,24 @@ async function toggleTorch() {
   }
 }
 
-// ================================================================
-//  DOMContentLoaded: カメラUI（案件追加のQR入力）
-//  ※ スマホのみ「カメラ起動」を表示。PCは非表示にしてファイル読み取りを促す
-// ================================================================
+// DOMContentLoaded 内の案件追加ボタン初期化部分を置換
 window.addEventListener("DOMContentLoaded", () => {
-  // オーバーレイ操作
   document.getElementById("close-button")?.addEventListener("click", stopScanning);
   document.getElementById("torch-button")?.addEventListener("click", toggleTorch);
 
-  // 案件追加のカメラボタン（スマホのみ表示）
+  // 案件追加：QR/PDF417
   const caseCameraBtn = document.getElementById("case-camera-btn");
-  const caseBarcodeInput = document.getElementById("case-barcode");
-
   if (caseCameraBtn) {
     if (canUseCamera()) {
-      // スマホ：表示してQRのみスキャン
+      // スマホ：カメラ起動表示（QR/PDF417）
       caseCameraBtn.style.display = "inline-block";
       caseCameraBtn.textContent = "カメラ起動";
       caseCameraBtn.onclick = () => {
-        // QRのみ（案件追加）
-        startScanning([Html5QrcodeSupportedFormats.QR_CODE], "case-barcode");
+        startScanning([Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.PDF_417], "case-barcode");
       };
     } else {
-      // PC：非表示。代わりにファイル入力からQR限定で読み込む
+      // PC：カメラボタン非表示、代わりに「ファイルを選択」を常に表示（QR/PDF417）
       caseCameraBtn.style.display = "none";
-      // 近くに「ファイルを選択」ボタンがある前提の場合はその処理でQR限定を使う
-      // なければここで補助ボタンを作る
       let fileBtn = document.getElementById("case-file-btn");
       if (!fileBtn) {
         fileBtn = document.createElement("button");
@@ -354,11 +485,11 @@ window.addEventListener("DOMContentLoaded", () => {
       fileBtn.onclick = () => {
         const fi = document.createElement("input");
         fi.type = "file";
-        fi.accept = "*/*";           // すべて表示（要望）
-        fi.capture = "environment";  // （PCでは効果なし）
+        fi.accept = "*/*";            // すべて表示（要望）
+        fi.capture = "environment";   // PCでは効果なし
         fi.onchange = e => {
           const f = e.target.files && e.target.files[0];
-          if (f) scanFileForInputStrict(f, "case-barcode", { forQR: true, forCodabar: false });
+          if (f) scanFileForInputStrict(f, "case-barcode", { allowedFormats: ["QR_CODE","PDF_417"], postprocess: "QR" });
         };
         fi.click();
       };
@@ -713,6 +844,7 @@ function createTrackingRow(context = "add") {
     });
     row.appendChild(camBtn);
   } else {
+    // PC 等：ファイル選択（画像）→ CODABAR 限定で読み取り
     const fileBtn = document.createElement("button");
     fileBtn.type = "button";
     fileBtn.textContent = "ファイルを選択";
@@ -724,7 +856,7 @@ function createTrackingRow(context = "add") {
       fi.capture = "environment";
       fi.onchange = e => {
         const f = e.target.files && e.target.files[0];
-        if (f) scanFileForInputStrict(f, uniqueId, { forQR: false, forCodabar: true });
+        if (f) scanFileForInputStrict(f, uniqueId, { allowedFormats: ["CODABAR"], postprocess: "CODABAR" });
       };
       fi.click();
     });
