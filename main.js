@@ -371,7 +371,6 @@ if (auth && auth.currentUser && isSessionExpired()) {
     console.warn("セッションタイムアウト時サインアウト失敗:", err);
   });
   try { localStorage.removeItem('loginTime'); } catch (_) {}
-});
   clearLoginTime();
 }
 
