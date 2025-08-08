@@ -14,15 +14,13 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
-// セッション永続化をブラウザのセッション単位に設定
+// セッション永続化をブラウザの「セッション」単位に設定（タブを閉じると破棄）
 auth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
-  .catch(err => {
-    console.error("永続化設定エラー:", err);
-  });
+  .catch(err => console.error("永続化設定エラー:", err));
 
 const db = firebase.database();
 
-// キャリアラベル
+// キャリア（ラベル表示）
 const carrierLabels = {
   yamato:  "ヤマト運輸",
   fukutsu: "福山通運",
@@ -44,123 +42,114 @@ const carrierUrls = {
 };
 
 // ================================================================
-//  スマホ向けカメラ読み取り機能の定義
-//
-// このプロジェクトでは html5-qrcode ライブラリを用いてバーコードや
-// QR コードを読み取り、読み取り結果を該当の入力欄へ自動入力します。
-// PC ではカメラ起動がサポートされていない環境が多いため、カメラ関連
-// ボタンはモバイル端末でのみ表示されるようにします。
+//  スマホ対応：カメラ／ファイル読み取り（html5-qrcode）
+// ================================================================
 
-// モバイル端末判定関数
+// モバイル端末判定
 function isMobileDevice() {
   const ua = navigator.userAgent || navigator.vendor || window.opera;
   return /android|iPad|iPhone|iPod/i.test(ua);
 }
 
-// カメラ使用可能かどうかを判定するユーティリティ関数
-// モバイル端末かつ navigator.mediaDevices.getUserMedia が利用可能な場合のみ
-// true を返します。モバイルでもカメラが利用できない環境では false となり、
-// PC 同様にファイル選択による読み取りを案内します。
+// カメラ利用可能判定（モバイル端末かつ getUserMedia ）
 function canUseCamera() {
-  const mobile = isMobileDevice();
-  const hasMedia = !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
-  return mobile && hasMedia;
+  return isMobileDevice() &&
+         !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function");
 }
 
-// 画像ファイルからバーコード/QR コードを読み取り、指定の入力欄に値を設定します。
-// file   : ユーザが選択した画像ファイル
-// inputId: 読み取り結果を書き込む input 要素の id
-// isCodabar: CODABAR フォーマットを読み取るかどうか（先頭末尾の A/B/C/D を除去）
+// 画像ファイル（カメラ撮影含む）から QR / バーコードをスキャンして該当 input へ反映
+// - file: File オブジェクト（<input type="file"> の選択結果）
+// - inputId: 結果を書き込む input 要素の id
+// - isCodabar: true の場合 CODABAR として先頭末尾 A/B/C/D を除去して入力
 async function scanFileForInput(file, inputId, isCodabar) {
-  // 一時的なスキャン用コンテナを用意（存在しなければ作成）
-  const tmpId = 'file-scan-temp-container';
-  let tmpEl = document.getElementById(tmpId);
-  if (!tmpEl) {
-    tmpEl = document.createElement('div');
-    tmpEl.id = tmpId;
-    tmpEl.style.display = 'none';
-    document.body.appendChild(tmpEl);
+  const TMP_ID = "file-scan-temp-container";
+  let host = document.getElementById(TMP_ID);
+  if (!host) {
+    host = document.createElement("div");
+    host.id = TMP_ID;
+    host.style.display = "none";
+    document.body.appendChild(host);
   }
-  const scanner = new Html5Qrcode(tmpId);
+  const scanner = new Html5Qrcode(TMP_ID);
   try {
-    // scanFile の第 2 引数を true にすると詳細結果が返るため decodedText を参照します
-    const result = await scanner.scanFile(file, true);
-    let decoded = (result && result.decodedText) ? result.decodedText : result;
-    if (decoded) {
-      // CODABAR の場合は先頭と末尾の制御文字を除去
-      if (isCodabar) {
-        if (decoded.length >= 2) {
-          const pre = decoded.charAt(0);
-          const suf = decoded.charAt(decoded.length - 1);
-          if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
-            decoded = decoded.substring(1, decoded.length - 1);
-          }
+    // 第2引数に true を渡すと {decodedText, result} 形式が返る
+    const res = await scanner.scanFile(file, true);
+    let decoded = res && res.decodedText ? res.decodedText : res;
+    if (!decoded) throw new Error("デコード結果なし");
+
+    // CODABAR の先頭末尾除去（開始/終了文字 A/B/C/D）
+    if (isCodabar) {
+      if (decoded.length >= 2) {
+        const pre = decoded[0];
+        const suf = decoded[decoded.length - 1];
+        if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
+          decoded = decoded.substring(1, decoded.length - 1);
         }
       }
-      const inputEl = document.getElementById(inputId);
-      if (inputEl) {
-        inputEl.value = decoded;
-        // 入力イベントを発火させ、既存の入力処理をトリガする
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-        // Enter キーイベントを発火させることでエンターキーと同等の処理を実行
-        const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-        inputEl.dispatchEvent(enterEv);
+    } else {
+      // QR の ZLIB64 展開に対応（案件追加QR）
+      if (decoded.startsWith("ZLIB64:")) {
+        const b64 = decoded.slice(7);
+        const bin = atob(b64);
+        const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
+        const dec = pako.inflate(arr);
+        decoded = new TextDecoder().decode(dec).trim().replace(/「[^」]*」/g, "");
       }
     }
-  } catch (err) {
-    console.error(err);
-    alert('ファイルからコードを読み取れませんでした');
+
+    const inputEl = document.getElementById(inputId);
+    if (inputEl) {
+      inputEl.value = decoded;
+      // 値変更イベント
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      // Enter を送信して既存の処理を進行
+      inputEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+  } catch (e) {
+    console.error("ファイルスキャン失敗:", e);
+    alert("ファイルからコードを読み取れませんでした");
   } finally {
-    // 後片付け
-    scanner.clear();
+    try { await scanner.clear(); } catch (_) {}
   }
 }
 
-// html5-qrcode 用の一時変数
-let html5QrCode = null;
-let scanningInputId = null;
-let torchOn = false;
-
-// mm を px に変換 (印刷サイズの計算で使用)
+// ミリメートル→ピクセル（プレビュー矩形の算出）
 function mmToPx(mm) {
   return mm * (96 / 25.4);
 }
 
-// 利用可能な背面カメラを選択 (複数ある場合は 2 番目を優先)
+// 背面カメラを選択（複数レンズがある場合は「下から二番目」を使用、1台ならそれ）
 async function selectBackCamera() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const backs = devices.filter(d =>
-      d.kind === 'videoinput' && /back|rear|environment/i.test(d.label)
-    );
-    // 背面カメラが複数ある場合、下から二番目のレンズを使用
-    if (backs.length >= 2) {
-      return backs[backs.length - 2].deviceId;
-    }
+    const backs = devices.filter(d => d.kind === "videoinput" && /back|rear|environment/i.test(d.label));
+    if (backs.length >= 2) return backs[backs.length - 2].deviceId;  // 末尾から2番目
     if (backs.length === 1) return backs[0].deviceId;
-  } catch (e) {
-    // ignore
-  }
+  } catch (_) {}
   return null;
 }
 
-// スキャン開始
+// html5-qrcode ランタイム
+let html5QrCode = null;
+let scanningInputId = null;
+let torchOn = false;
+
+// ライブカメラでスキャン開始（CODABAR などに使用）
 async function startScanning(formats, inputId) {
-  if (!isMobileDevice()) {
-    alert('このデバイスではカメラ機能を利用できません');
+  // ライブカメラはモバイル＋getUserMedia のみ
+  if (!canUseCamera()) {
+    alert("このデバイスではカメラ機能を利用できません（ファイルから読み取りをご利用ください）");
     return;
   }
-  // 重複起動を防ぐ
+
+  // 二重起動を回避
   if (html5QrCode) {
-    try {
-      await html5QrCode.stop();
-      html5QrCode.clear();
-    } catch (e) {}
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch (_) {}
     html5QrCode = null;
   }
   scanningInputId = inputId;
 
-  // オーバーレイサイズ調整
+  // オーバーレイ（9:16、周囲5mmマージン）
   const margin = mmToPx(5) * 2;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -172,169 +161,312 @@ async function startScanning(formats, inputId) {
   } else {
     h = w / ratio;
   }
-  const sc = document.getElementById('scanner-container');
+  const sc = document.getElementById("scanner-container");
   if (sc) {
-    sc.style.width = w + 'px';
-    sc.style.height = h + 'px';
+    sc.style.width = `${w}px`;
+    sc.style.height = `${h}px`;
   }
-  // オーバーレイ表示
-  const overlay = document.getElementById('scanner-overlay');
+  const overlay = document.getElementById("scanner-overlay");
   if (overlay) {
-    overlay.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    overlay.style.display = "flex";
+    document.body.style.overflow = "hidden";
   }
+
   // 初期化
-  html5QrCode = new Html5Qrcode('video-container', false);
+  html5QrCode = new Html5Qrcode("video-container", false);
   const backId = await selectBackCamera();
-  const constraints = backId
-    ? { deviceId: { exact: backId } }
-    : { facingMode: { exact: 'environment' } };
+  const constraints = backId ? { deviceId: { exact: backId } } : { facingMode: { exact: "environment" } };
   const config = {
     fps: 10,
     formatsToSupport: formats,
     experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     useBarCodeDetectorIfSupported: true
   };
-  const onSuccess = decoded => {
+
+  const onDecode = decoded => {
+    const inputEl = document.getElementById(inputId);
+    if (!inputEl) { stopScanning(); return; }
+
     try {
-      const inputEl = document.getElementById(inputId);
-      if (!inputEl) {
-        stopScanning();
-        return;
-      }
-      // CODABAR の場合は先頭と末尾が A/B/C/D であるか判定
       if (formats.length === 1 && formats[0] === Html5QrcodeSupportedFormats.CODABAR) {
+        // CODABAR の場合：先頭末尾 A/B/C/D を確認してトリミング
         if (decoded && decoded.length >= 2) {
-          const pre = decoded[0];
-          const suf = decoded[decoded.length - 1];
+          const pre = decoded[0], suf = decoded[decoded.length - 1];
           if (/[ABCD]/i.test(pre) && /[ABCD]/i.test(suf)) {
-            // 先頭と末尾を除去
-            const trimmed = decoded.substring(1, decoded.length - 1);
-            inputEl.value = trimmed;
-            // 値変更イベント
-            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-            // Enter を送信して次の欄に移動させる
-            const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-            inputEl.dispatchEvent(enterEv);
-            stopScanning();
+            decoded = decoded.substring(1, decoded.length - 1);
           }
         }
       } else {
-        // QR_CODE またはその他のフォーマット
-        if (decoded) {
-          // 注文登録用 QR は ZLIB64: で始まることを想定
-          // それ以外の場合でも値を入力欄にセットする
-          inputEl.value = decoded;
-          // 入力イベント
-          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-          // Enter を送信して既存処理を発火させる
-          const enterEv2 = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-          inputEl.dispatchEvent(enterEv2);
-          stopScanning();
+        // QR：ZLIB64 展開（案件追加用想定）
+        if (decoded && decoded.startsWith("ZLIB64:")) {
+          const b64 = decoded.slice(7);
+          const bin = atob(b64);
+          const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
+          const dec = pako.inflate(arr);
+          decoded = new TextDecoder().decode(dec).trim().replace(/「[^」]*」/g, "");
         }
       }
-    } catch (err) {
-      console.error(err);
+
+      inputEl.value = decoded || "";
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      stopScanning();
+    } catch (e) {
+      console.error("デコード処理エラー:", e);
       stopScanning();
     }
   };
+
   try {
-    await html5QrCode.start(constraints, config, onSuccess, () => {});
+    await html5QrCode.start(constraints, config, onDecode, () => {});
   } catch (e) {
-    console.error(e);
-    alert('カメラ起動に失敗しました');
+    console.error("カメラ起動失敗:", e);
+    alert("カメラ起動に失敗しました");
     stopScanning();
   }
-  // フォーカス動作: プレビュー領域をタップでオートフォーカス
-  const videoContainer = document.getElementById('video-container');
+
+  // プレビュー領域タップで単発AF（端末による）
+  const videoContainer = document.getElementById("video-container");
   if (videoContainer) {
-    videoContainer.addEventListener('click', async () => {
-      if (html5QrCode) {
-        try {
-          await html5QrCode.applyVideoConstraints({ advanced: [{ focusMode: 'single-shot' }] });
-        } catch (e) {}
-      }
+    videoContainer.addEventListener("click", async () => {
+      if (!html5QrCode) return;
+      try { await html5QrCode.applyVideoConstraints({ advanced: [{ focusMode: "single-shot" }] }); } catch (_) {}
     });
   }
 }
 
-// スキャン停止
+// スキャン停止（オーバーレイも閉じる）
 async function stopScanning() {
   if (html5QrCode) {
-    try {
-      await html5QrCode.stop();
-      html5QrCode.clear();
-    } catch (e) {}
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch (_) {}
     html5QrCode = null;
   }
-  const overlay = document.getElementById('scanner-overlay');
-  if (overlay) overlay.style.display = 'none';
-  document.body.style.overflow = '';
+  const overlay = document.getElementById("scanner-overlay");
+  if (overlay) overlay.style.display = "none";
+  document.body.style.overflow = "";
   torchOn = false;
 }
 
-// ライトトグル
+// ライトの ON/OFF
 async function toggleTorch() {
   if (!html5QrCode) return;
   try {
     const settings = html5QrCode.getRunningTrackSettings();
-    if (!('torch' in settings)) {
-      alert('このデバイスはライトに対応していません');
+    if (!("torch" in settings)) {
+      alert("このデバイスはライト制御に対応していません");
       return;
     }
     torchOn = !torchOn;
     await html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
   } catch (e) {
-    console.warn(e);
+    console.warn("ライト制御失敗:", e);
   }
 }
 
-// DOMContentLoaded 時にカメラ関連 UI を初期化
-window.addEventListener('DOMContentLoaded', () => {
-  // オーバーレイのボタンにイベントを紐付け
-  const closeBtn = document.getElementById('close-button');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      stopScanning();
+// ================================================================
+//  DOMContentLoaded: カメラUI初期化（案件追加のQR入力用）
+// ================================================================
+window.addEventListener("DOMContentLoaded", () => {
+  // オーバーレイの制御ボタン
+  const closeBtn = document.getElementById("close-button");
+  if (closeBtn) closeBtn.addEventListener("click", stopScanning);
+  const torchBtn = document.getElementById("torch-button");
+  if (torchBtn) torchBtn.addEventListener("click", toggleTorch);
+
+  // 「案件追加」→ QR 入力欄（#case-barcode）に対する UI
+  const caseCameraBtn = document.getElementById("case-camera-btn"); // 「カメラ起動」
+  if (caseCameraBtn) {
+    caseCameraBtn.style.display = "inline-block";
+    // 「カメラ起動」を押すと、その下に「ファイルを選択」ボタンを表示し、
+    // 端末カメラで写真を撮って（input capture）、ファイルでスキャンする流れ。
+    let caseFileBtn = document.getElementById("case-file-btn");
+    if (!caseFileBtn) {
+      caseFileBtn = document.createElement("button");
+      caseFileBtn.id = "case-file-btn";
+      caseFileBtn.type = "button";
+      caseFileBtn.textContent = "ファイルを選択";
+      caseFileBtn.style.display = "none";
+      caseCameraBtn.insertAdjacentElement("afterend", caseFileBtn);
+    }
+    caseCameraBtn.addEventListener("click", () => {
+      // ボタンを表示するだけ（ライブカメラは使わず、静止画スキャン）
+      caseFileBtn.style.display = "inline-block";
     });
-  }
-  const torchBtn = document.getElementById('torch-button');
-  if (torchBtn) {
-    torchBtn.addEventListener('click', () => {
-      toggleTorch();
-    });
-  }
-  // 案件追加用カメラ／ファイルボタン
-  const caseCameraBtn = document.getElementById('case-camera-btn');
-  const caseFileBtn   = document.getElementById('case-file-btn');
-  const caseFileInput = document.getElementById('case-file-input');
-  if (caseCameraBtn && caseFileBtn && caseFileInput) {
-    caseCameraBtn.textContent = 'カメラ起動';
-    caseCameraBtn.style.display = 'block';
-    // カメラ起動ボタンで撮影用ファイル選択ボタンを表示
-    caseCameraBtn.addEventListener('click', () => {
-      caseFileBtn.style.display = 'block';
-    });
-    // ファイル選択ボタンでカメラ撮影 or 既存ファイルを読み込んでスキャン
-    caseFileBtn.addEventListener('click', () => {
-      caseFileInput.click();
-    });
-    // ファイル選択時に読み取り処理を実施
-    caseFileInput.addEventListener('change', e => {
-      const f = e.target.files && e.target.files[0];
-      if (f) {
-        scanFileForInput(f, 'case-barcode', false);
-      }
-      e.target.value = '';
+
+    // ファイル選択→撮影→QRのみスキャン（ZLIB64対応）
+    caseFileBtn.addEventListener("click", () => {
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      // すべて表示（ただし実際のスキャン対象は画像）
+      fileInput.accept = "*/*";
+      // 背面カメラを優先した撮影モード（対応端末のみ）
+      fileInput.capture = "environment";
+      fileInput.onchange = e => {
+        const f = e.target.files && e.target.files[0];
+        if (f) {
+          // 案件追加のQRは CODABAR ではないので false
+          scanFileForInput(f, "case-barcode", false);
+        }
+      };
+      fileInput.click();
     });
   }
 });
 
-// --- 認証監視 ---
+// ================================================================
+//  以降：アプリ本体（認証・画面遷移・CRUD・検索・詳細 など）
+// ================================================================
+
+let isAdmin = false;
+let sessionTimer = null;
+let currentOrderId = null;
+
+// --- DOM取得（ログイン画面） ---
+const loginView      = document.getElementById("login-view");
+const mainView       = document.getElementById("main-view");
+const loginErrorEl   = document.getElementById("login-error");
+const emailInput     = document.getElementById("email");
+const passwordInput  = document.getElementById("password");
+const loginBtn       = document.getElementById("login-btn");
+const signupBtn      = document.getElementById("signup-btn");
+const guestBtn       = document.getElementById("guest-btn");
+const resetBtn       = document.getElementById("reset-btn");
+const logoutBtn      = document.getElementById("logout-btn");
+
+// --- DOM取得（新規登録画面） ---
+const signupView            = document.getElementById("signup-view");
+const signupEmail           = document.getElementById("signup-email");
+const signupPassword        = document.getElementById("signup-password");
+const signupConfirmPassword = document.getElementById("signup-confirm-password");
+const signupConfirmBtn      = document.getElementById("signup-confirm-btn");
+const backToLoginBtn        = document.getElementById("back-to-login-btn");
+const signupErrorEl         = document.getElementById("signup-error");
+
+// --- DOM取得（ナビ） ---
+const navAddBtn    = document.getElementById("nav-add-btn");
+const navSearchBtn = document.getElementById("nav-search-btn");
+
+// --- DOM取得（案件追加ビュー） ---
+const scanModeDiv         = document.getElementById("scan-mode");
+const manualModeDiv       = document.getElementById("manual-mode");
+const startManualBtn      = document.getElementById("start-manual-btn");
+const caseBarcodeInput    = document.getElementById("case-barcode");
+const manualOrderIdInput  = document.getElementById("manual-order-id");
+const manualCustomerInput = document.getElementById("manual-customer");
+const manualTitleInput    = document.getElementById("manual-title");
+const manualConfirmBtn    = document.getElementById("manual-confirm-btn");
+const startScanBtn        = document.getElementById("start-scan-btn");
+
+const caseDetailsDiv      = document.getElementById("case-details");
+const detailOrderId       = document.getElementById("detail-order-id");
+const detailCustomer      = document.getElementById("detail-customer");
+const detailTitle         = document.getElementById("detail-title");
+
+const fixedCarrierCheckbox = document.getElementById("fixed-carrier-checkbox");
+const fixedCarrierSelect   = document.getElementById("fixed-carrier-select");
+const trackingRows         = document.getElementById("tracking-rows");
+const addTrackingRowBtn    = document.getElementById("add-tracking-row-btn");
+const confirmAddCaseBtn    = document.getElementById("confirm-add-case-btn");
+const addCaseMsg           = document.getElementById("add-case-msg");
+const anotherCaseBtn       = document.getElementById("another-case-btn");
+
+// --- DOM取得（検索ビュー） ---
+const searchView        = document.getElementById("search-view");
+const searchInput       = document.getElementById("search-input");
+const startDateInput    = document.getElementById("start-date");
+const endDateInput      = document.getElementById("end-date");
+const searchBtn         = document.getElementById("search-btn");
+const listAllBtn        = document.getElementById("list-all-btn");
+const searchResults     = document.getElementById("search-results");
+const deleteSelectedBtn = document.getElementById("delete-selected-btn");
+
+// 管理者用：全選択チェックボックス
+const selectAllContainer = document.getElementById("select-all-container");
+const selectAllCheckbox  = document.getElementById("select-all-checkbox");
+if (selectAllCheckbox) {
+  selectAllCheckbox.onchange = () => {
+    const boxes = searchResults.querySelectorAll(".select-case-checkbox");
+    boxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+  };
+}
+
+// --- DOM取得（案件詳細ビュー） ---
+const caseDetailView               = document.getElementById("case-detail-view");
+const detailInfoDiv                = document.getElementById("detail-info");
+const detailShipmentsUl            = document.getElementById("detail-shipments");
+const showAddTrackingBtn           = document.getElementById("show-add-tracking-btn");
+const addTrackingDetail            = document.getElementById("add-tracking-detail");
+const detailTrackingRows           = document.getElementById("detail-tracking-rows");
+const detailAddRowBtn              = document.getElementById("detail-add-tracking-row-btn");
+const confirmDetailAddBtn          = document.getElementById("confirm-detail-add-btn");
+const detailAddMsg                 = document.getElementById("detail-add-msg");
+const cancelDetailAddBtn           = document.getElementById("cancel-detail-add-btn");
+const fixedCarrierCheckboxDetail   = document.getElementById("fixed-carrier-checkbox-detail");
+const fixedCarrierSelectDetail     = document.getElementById("fixed-carrier-select-detail");
+const backToSearchBtn              = document.getElementById("back-to-search-btn");
+const anotherCaseBtn2              = document.getElementById("another-case-btn-2");
+
+// ================================================================
+//  セッション管理（10分無操作で強制ログアウト）
+// ================================================================
+const SESSION_LIMIT_MS = 10 * 60 * 1000;
+
+function clearLoginTime() {
+  localStorage.removeItem("loginTime");
+}
+function markLoginTime() {
+  localStorage.setItem("loginTime", Date.now().toString());
+}
+function isSessionExpired() {
+  const t = parseInt(localStorage.getItem("loginTime") || "0", 10);
+  return Date.now() - t > SESSION_LIMIT_MS;
+}
+// 初期判定（期限切れなら即サインアウト）
+if (isSessionExpired()) {
+  auth.signOut().catch(err => console.warn("セッション期限切れサインアウト失敗:", err));
+  clearLoginTime();
+}
+
+// ユーザー操作でタイマー更新＆loginTime更新
+function resetSessionTimer() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(() => {
+    alert("10分間操作がなかったため、ログアウトしました。再度ログインしてください。");
+    auth.signOut();
+    if (emailInput) emailInput.value = "";
+    if (passwordInput) passwordInput.value = "";
+  }, SESSION_LIMIT_MS);
+  markLoginTime();
+}
+function startSessionTimer() {
+  resetSessionTimer();
+  ["click", "keydown", "touchstart", "input", "change"].forEach(evt => {
+    document.addEventListener(evt, resetSessionTimer, { passive: true });
+  });
+}
+
+// ================================================================
+//  画面遷移ユーティリティ
+// ================================================================
+function showView(id) {
+  document.querySelectorAll(".subview").forEach(el => el.style.display = "none");
+  const target = document.getElementById(id);
+  if (target) target.style.display = "block";
+}
+
+// ページロード直後のフォーカス（任意で有効化可能）
+// if (loginView && loginView.style.display !== "none") emailInput?.focus();
+
+// ================================================================
+//  認証状態監視
+// ================================================================
 auth.onAuthStateChanged(async user => {
+  const statusContainer = document.getElementById("login-status-container");
+  if (statusContainer) statusContainer.textContent = "";
+
   if (user) {
+    // 管理者判定
     try {
-      // Realtime DB の admins/{uid} が true なら管理者扱い
       const snap = await db.ref(`admins/${user.uid}`).once("value");
       isAdmin = snap.val() === true;
     } catch (e) {
@@ -342,25 +474,35 @@ auth.onAuthStateChanged(async user => {
       isAdmin = false;
     }
 
-    loginView.style.display = "none";
-    signupView.style.display = "none";
-    mainView.style.display = "block";
+    if (loginView) loginView.style.display = "none";
+    if (signupView) signupView.style.display = "none";
+    if (mainView) mainView.style.display = "block";
+
+    if (statusContainer) statusContainer.textContent = `${user.email || "ログイン中"} でログイン中`;
+
+    // 初期画面：案件追加
     showView("add-case-view");
     initAddCaseView();
+
+    // セッションタイマー開始
     startSessionTimer();
-    // 管理者の場合は一括削除ボタンの表示を更新
-    deleteSelectedBtn.style.display = isAdmin ? "block" : "none";
+
+    // 管理者UI
+    if (deleteSelectedBtn) deleteSelectedBtn.style.display = isAdmin ? "block" : "none";
   } else {
-    // ログアウト時
+    // ログアウト遷移
     isAdmin = false;
-    loginView.style.display = "block";
-    signupView.style.display = "none";
-    mainView.style.display = "none";
+    if (loginView)  loginView.style.display = "block";
+    if (signupView) signupView.style.display = "none";
+    if (mainView)   mainView.style.display = "none";
     clearLoginTime();
+    if (statusContainer) statusContainer.textContent = "ログインしてください";
   }
 });
 
-// --- 認証操作 ---
+// ================================================================
+//  認証操作
+// ================================================================
 loginBtn.onclick = async () => {
   const email = emailInput.value.trim();
   const password = passwordInput.value;
@@ -374,10 +516,9 @@ loginBtn.onclick = async () => {
   }
 };
 signupBtn.onclick = () => {
-  // 新規登録ページへ切り替え
-  loginView.style.display = "none";
-  signupView.style.display = "block";
-  // 入力欄の初期化とエラークリア
+  if (loginView) loginView.style.display = "none";
+  if (signupView) signupView.style.display = "block";
+  // フォーム初期化
   signupEmail.value = emailInput.value.trim() || "";
   signupPassword.value = "";
   signupConfirmPassword.value = "";
@@ -394,85 +535,71 @@ resetBtn.onclick = () => {
     .catch(e => loginErrorEl.textContent = e.message);
 };
 logoutBtn.onclick = async () => {
-  try {
-    await auth.signOut();
-  } catch (e) {
-    console.error("サインアウトエラー:", e);
-  }
-  // メール・パスワード欄をクリア
-  emailInput.value    = "";
-  passwordInput.value = "";
-  // セッションタイムスタンプ削除
+  try { await auth.signOut(); } catch (e) { console.error("サインアウトエラー:", e); }
+  // 入力欄クリア・セッション削除・LS全消し
+  if (emailInput) emailInput.value = "";
+  if (passwordInput) passwordInput.value = "";
   clearLoginTime();
-  // localStorage をまるごとクリア
   localStorage.clear();
 };
 
-// ログイン状態が変わったときに呼ばれるリスナー
-auth.onAuthStateChanged(user => {
-  const statusContainer = document.getElementById('login-status-container');
-  statusContainer.textContent = '';  // まずクリア
-
-  if (user) {
-    // ログイン中
-    // user.email や user.uid など好きな情報を表示できます
-    statusContainer.textContent = `${user.email} でログイン中`;
-  } else {
-    // 未ログイン時はなにも表示しない or 別文言を出してもOK
-    statusContainer.textContent = 'ログインしてください';
-  }
-});
-
-// 新規登録ビュー: 登録処理
+// 新規登録：登録処理
 signupConfirmBtn.onclick = async () => {
   const email = signupEmail.value.trim();
   const pass  = signupPassword.value;
-  const confirmPass = signupConfirmPassword.value;
+  const pass2 = signupConfirmPassword.value;
   signupErrorEl.textContent = "";
-  if (!email || !pass || !confirmPass) {
+  if (!email || !pass || !pass2) {
     signupErrorEl.textContent = "全て入力してください";
     return;
   }
-  if (pass !== confirmPass) {
+  if (pass !== pass2) {
     signupErrorEl.textContent = "パスワードが一致しません";
     return;
   }
   try {
     await auth.createUserWithEmailAndPassword(email, pass);
     markLoginTime();
-    // アカウント作成後、Firebase の onAuthStateChanged によりメインビューへ遷移
+    // onAuthStateChanged によりメイン画面へ
   } catch (e) {
     signupErrorEl.textContent = e.message;
   }
 };
-
-// 新規登録ビュー: ログイン画面へ戻る
+// 新規登録→ログインに戻る
 backToLoginBtn.onclick = () => {
-  signupView.style.display = "none";
-  loginView.style.display  = "block";
+  if (signupView) signupView.style.display = "none";
+  if (loginView)  loginView.style.display  = "block";
   signupErrorEl.textContent = "";
-  loginErrorEl.textContent = "";
+  loginErrorEl.textContent  = "";
 };
 
-// --- ナビゲーション ---
+// ================================================================
+//  ナビゲーション
+// ================================================================
 navAddBtn.addEventListener("click", () => {
   showView("add-case-view");
   initAddCaseView();
 });
 navSearchBtn.addEventListener("click", () => {
   showView("search-view");
-  // ナビゲーションから検索を開いたときは検索条件をクリアして全件表示
+  // 条件クリアして全件表示
   searchInput.value = "";
   startDateInput.value = "";
-  endDateInput.value = "";
+  endDateInput.value   = "";
   searchAll();
 });
 
-// --- 追跡行生成 ---
-function createTrackingRow(context="add"){
+// ================================================================
+//  追跡行（入力欄＋カメラ/ファイルボタン）生成
+//  - 案件追加画面、および詳細画面の「追跡番号追加」で使用
+//  - モバイル（カメラ可）: ライブカメラ（CODABAR）
+//  - PC/非対応: ファイル選択→静止画読み取り（CODABAR）
+// ================================================================
+function createTrackingRow(context = "add") {
   const row = document.createElement("div");
   row.className = "tracking-row";
-  // 運送会社セレクトの付与
+
+  // 運送会社 select（固定チェック有無で変化）
   if (context === "add") {
     if (!fixedCarrierCheckbox.checked) {
       const sel = document.createElement("select");
@@ -500,130 +627,156 @@ function createTrackingRow(context="add"){
       row.appendChild(sel);
     }
   }
+
+  // 追跡番号 input
   const inp = document.createElement("input");
   inp.type = "text";
-  // 入力案内をわかりやすく
   inp.placeholder = "追跡番号を入力してください";
   inp.inputMode = "numeric";
-  const uniqueId = `tracking-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+  const uniqueId = `tracking-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   inp.id = uniqueId;
+
+  // 入力中は非数値を除去
   inp.addEventListener("input", e => {
     e.target.value = e.target.value.replace(/\D/g, "");
   });
+
+  // Enter/Tab で次行へ、最後なら行追加
   inp.addEventListener("keydown", e => {
-    if(e.key === "Enter" || e.key === "Tab"){
-      e.preventDefault();
-      // いま見えているテキスト入力欄数を覚えておく
-      const inputs = Array.from(
-        row.parentElement.querySelectorAll('input[type="text"]')
-      );
-      const countBefore = inputs.length;
-      const idx = inputs.indexOf(inp);
-  
-      if (idx !== -1 && idx < countBefore - 1) {
-        // 最後以外なら普通に次へ
-        inputs[idx + 1].focus();
-      } else {
-        // 最後の欄なら行追加
-        if (context === "detail") {
-          detailAddRowBtn.click();
-        } else {
-          addTrackingRowBtn.click();
-        }
-        // 行追加後、元の最後の次の欄（= countBefore 番目）にフォーカス
-        setTimeout(() => {
-          const newInputs = Array.from(
-            row.parentElement.querySelectorAll('input[type="text"]')
-          );
-          if (newInputs[countBefore]) {
-            newInputs[countBefore].focus();
-          }
-        }, 0);
-      }
+    if (e.key !== "Enter" && e.key !== "Tab") return;
+    e.preventDefault();
+    const inputs = Array.from(row.parentElement.querySelectorAll('input[type="text"]'));
+    const countBefore = inputs.length;
+    const idx = inputs.indexOf(inp);
+    if (idx !== -1 && idx < countBefore - 1) {
+      inputs[idx + 1].focus();
+    } else {
+      if (context === "detail") detailAddRowBtn.click();
+      else addTrackingRowBtn.click();
+      setTimeout(() => {
+        const newInputs = Array.from(row.parentElement.querySelectorAll('input[type="text"]'));
+        if (newInputs[countBefore]) newInputs[countBefore].focus();
+      }, 0);
     }
   });
+
   row.appendChild(inp);
 
-  // --- カメラ起動／ファイル選択ボタン ---
-  // 追跡番号入力欄の右側に配置します。カメラが利用可能な場合は「カメラ起動」ボタンを、
-  // PC やカメラ非対応端末では「ファイルを選択」ボタンを表示します。
+  // カメラ／ファイルボタン
   if (canUseCamera()) {
-    // モバイルかつカメラ対応: カメラ起動ボタン
-    const camBtn = document.createElement('button');
-    camBtn.type = 'button';
-    camBtn.textContent = 'カメラ起動';
-    camBtn.className = 'camera-btn';
-    camBtn.addEventListener('click', () => {
-      // １次元バーコード (CodaBar) を対象とする
-      startScanning([
-        Html5QrcodeSupportedFormats.CODABAR
-      ], uniqueId);
+    // モバイル（カメラ可）：ライブカメラで CODABAR リーダ
+    const camBtn = document.createElement("button");
+    camBtn.type = "button";
+    camBtn.textContent = "カメラ起動";
+    camBtn.className = "camera-btn";
+    camBtn.addEventListener("click", () => {
+      startScanning([Html5QrcodeSupportedFormats.CODABAR], uniqueId);
     });
     row.appendChild(camBtn);
   } else {
-    // PC など: ファイル選択ボタン
-    // 非表示の file input を用意し、ボタン押下時にクリックさせる
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '*/*';
-    fileInput.capture = 'environment';
-    fileInput.style.display = 'none';
-    const fileBtn = document.createElement('button');
-    fileBtn.type = 'button';
-    fileBtn.textContent = 'ファイルを選択';
-    // カメラボタンと同じスタイルを適用
-    fileBtn.className = 'camera-btn';
-    fileBtn.addEventListener('click', () => {
+    // PC 等：ファイル選択（画像）→ CODABAR スキャン
+    const fileBtn = document.createElement("button");
+    fileBtn.type = "button";
+    fileBtn.textContent = "ファイルを選択";
+    fileBtn.className = "camera-btn";
+
+    fileBtn.addEventListener("click", () => {
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      // すべて表示（ただし実際のスキャンは画像ファイルを想定）
+      fileInput.accept = "*/*";
+      fileInput.capture = "environment";
+      fileInput.onchange = e => {
+        const f = e.target.files && e.target.files[0];
+        if (f) scanFileForInput(f, uniqueId, true); // CODABAR
+      };
       fileInput.click();
     });
-    // ファイル選択時に読み取り処理を実施
-    fileInput.addEventListener('change', e => {
-      const f = e.target.files && e.target.files[0];
-      if (f) {
-        // CODABAR 用フラグを true にする
-        scanFileForInput(f, uniqueId, true);
-      }
-      // 同じファイルを再度選択したときのために値をリセット
-      e.target.value = '';
-    });
+
     row.appendChild(fileBtn);
-    row.appendChild(fileInput);
   }
 
-  // リアルタイムで運送会社未選択行を強調する
+  // 運送会社未選択の強調（追跡番号が入っているのにキャリア未選択）
   function updateMissingHighlight() {
-    // 追跡番号が入力されているか？
     const tnVal = inp.value.trim();
-    // コンテキストごとに固定キャリアの有無を考慮
     let carrierVal;
     if (context === "add") {
       carrierVal = fixedCarrierCheckbox.checked ? fixedCarrierSelect.value : row.querySelector("select")?.value;
     } else {
       carrierVal = fixedCarrierCheckboxDetail.checked ? fixedCarrierSelectDetail.value : row.querySelector("select")?.value;
     }
-    if (tnVal && !carrierVal) {
-      row.classList.add('missing-carrier');
-    } else {
-      row.classList.remove('missing-carrier');
-    }
+    if (tnVal && !carrierVal) row.classList.add("missing-carrier");
+    else row.classList.remove("missing-carrier");
   }
-  // 入力やセレクト変更時に強調を更新
-  inp.addEventListener('input', updateMissingHighlight);
-  // select は row 内に存在する場合のみ
-  const selEl = row.querySelector('select');
-  if (selEl) {
-    selEl.addEventListener('change', updateMissingHighlight);
-  }
+  inp.addEventListener("input", updateMissingHighlight);
+  const selEl = row.querySelector("select");
+  if (selEl) selEl.addEventListener("change", updateMissingHighlight);
+
   return row;
 }
 
-// --- 詳細画面：一括運送会社指定 ---
-fixedCarrierCheckboxDetail.onchange = () => {
-  fixedCarrierSelectDetail.style.display = fixedCarrierCheckboxDetail.checked ? "inline-block" : "none";
-  // 既に追加済みの行についても select を追加／削除
-  Array.from(detailTrackingRows.children).forEach(row => {
+// ================================================================
+//  詳細画面：一括運送会社指定（固定のON/OFF）
+// ================================================================
+if (fixedCarrierCheckboxDetail) {
+  fixedCarrierCheckboxDetail.onchange = () => {
+    fixedCarrierSelectDetail.style.display = fixedCarrierCheckboxDetail.checked ? "inline-block" : "none";
+    Array.from(detailTrackingRows.children).forEach(row => {
+      const sel = row.querySelector("select");
+      if (fixedCarrierCheckboxDetail.checked) {
+        if (sel) row.removeChild(sel);
+      } else {
+        if (!sel) {
+          const newSel = document.createElement("select");
+          newSel.innerHTML = `
+            <option value="">運送会社選択してください</option>
+            <option value="yamato">ヤマト運輸</option>
+            <option value="fukutsu">福山通運</option>
+            <option value="seino">西濃運輸</option>
+            <option value="tonami">トナミ運輸</option>
+            <option value="hida">飛騨運輸</option>
+            <option value="sagawa">佐川急便</option>`;
+          row.insertBefore(newSel, row.firstChild);
+        }
+      }
+    });
+  };
+}
+
+// ================================================================
+//  初期化：案件追加ビュー
+// ================================================================
+function initAddCaseView() {
+  if (scanModeDiv) scanModeDiv.style.display = "block";
+  if (manualModeDiv) manualModeDiv.style.display = "none";
+  if (caseDetailsDiv) caseDetailsDiv.style.display = "none";
+  if (caseBarcodeInput) caseBarcodeInput.value = "";
+  if (manualOrderIdInput) manualOrderIdInput.value = "";
+  if (manualCustomerInput) manualCustomerInput.value = "";
+  if (manualTitleInput) manualTitleInput.value = "";
+  if (addCaseMsg) addCaseMsg.textContent = "";
+
+  if (fixedCarrierCheckbox) fixedCarrierCheckbox.checked = false;
+  if (fixedCarrierSelect) {
+    fixedCarrierSelect.style.display = "none";
+    fixedCarrierSelect.value = "";
+  }
+
+  if (trackingRows) {
+    trackingRows.innerHTML = "";
+    for (let i = 0; i < 10; i++) trackingRows.appendChild(createTrackingRow());
+  }
+}
+
+// 行追加・固定キャリア切替
+addTrackingRowBtn.onclick = () => {
+  for (let i = 0; i < 10; i++) trackingRows.appendChild(createTrackingRow());
+};
+fixedCarrierCheckbox.onchange = () => {
+  fixedCarrierSelect.style.display = fixedCarrierCheckbox.checked ? "block" : "none";
+  Array.from(trackingRows.children).forEach(row => {
     const sel = row.querySelector("select");
-    if (fixedCarrierCheckboxDetail.checked) {
+    if (fixedCarrierCheckbox.checked) {
       if (sel) row.removeChild(sel);
     } else {
       if (!sel) {
@@ -642,105 +795,63 @@ fixedCarrierCheckboxDetail.onchange = () => {
   });
 };
 
-// --- 初期化：案件追加 ---
-function initAddCaseView(){
-  scanModeDiv.style.display     = "block";
-  manualModeDiv.style.display   = "none";
-  caseDetailsDiv.style.display  = "none";
-  caseBarcodeInput.value        = "";
-  manualOrderIdInput.value      = "";
-  manualCustomerInput.value     = "";
-  manualTitleInput.value        = "";
-  addCaseMsg.textContent        = "";
-  fixedCarrierCheckbox.checked  = false;
-  fixedCarrierSelect.style.display = "none";
-  fixedCarrierSelect.value      = "";
-  trackingRows.innerHTML        = "";
-  for(let i=0;i<10;i++) trackingRows.appendChild(createTrackingRow());
-}
-
-// --- 行追加・固定キャリア切替 ---
-addTrackingRowBtn.onclick = () => {
-  for(let i=0;i<10;i++) trackingRows.appendChild(createTrackingRow());
-};
-fixedCarrierCheckbox.onchange = () => {
-  fixedCarrierSelect.style.display = fixedCarrierCheckbox.checked ? "block" : "none";
-  Array.from(trackingRows.children).forEach(row => {
-    const sel = row.querySelector("select");
-    if(fixedCarrierCheckbox.checked){
-      if(sel) row.removeChild(sel);
-    } else {
-      if(!sel){
-        // create a select only, not entire row
-        const newSel = document.createElement("select");
-        newSel.innerHTML = `
-          <option value="">運送会社選択してください</option>
-          <option value="yamato">ヤマト運輸</option>
-          <option value="fukutsu">福山通運</option>
-          <option value="seino">西濃運輸</option>
-          <option value="tonami">トナミ運輸</option>
-          <option value="hida">飛騨運輸</option>
-          <option value="sagawa">佐川急便</option>`;
-        row.insertBefore(newSel, row.firstChild);
-      }
-    }
-  });
-};
-
-// --- IME無効化 ---
+// IME無効化（QR入力欄）
 caseBarcodeInput.addEventListener("compositionstart", e => e.preventDefault());
 
-// --- QR→テキスト展開＆表示 ---
+// QR→テキスト展開（案件追加） Enter で確定
 caseBarcodeInput.addEventListener("keydown", e => {
-  if(e.key !== "Enter") return;
+  if (e.key !== "Enter") return;
   const raw = caseBarcodeInput.value.trim();
-  if(!raw) return;
+  if (!raw) return;
   let text;
-  try{
-    if(raw.startsWith("ZLIB64:")){
+  try {
+    if (raw.startsWith("ZLIB64:")) {
       const b64 = raw.slice(7);
       const bin = atob(b64);
-      const arr = new Uint8Array([...bin].map(c=>c.charCodeAt(0)));
+      const arr = new Uint8Array([...bin].map(c => c.charCodeAt(0)));
       const dec = pako.inflate(arr);
       text = new TextDecoder().decode(dec);
     } else {
       text = raw;
     }
-  }catch(err){
-    alert("QRデコード失敗: "+err.message);
+  } catch (err) {
+    alert("QRデコード失敗: " + err.message);
     return;
   }
-  text = text.trim().replace(/「[^」]*」/g, "");
-  const matches = Array.from(text.matchAll(/"([^"]*)"/g), m=>m[1]);
+  // 余計な鉤括弧内（「...」）は除去
+  text = (text || "").trim().replace(/「[^」]*」/g, "");
+  const matches = Array.from(text.matchAll(/"([^"]*)"/g), m => m[1]);
   detailOrderId.textContent  = matches[0] || "";
   detailCustomer.textContent = matches[1] || "";
   detailTitle.textContent    = matches[2] || "";
-  scanModeDiv.style.display = "none";
-  caseDetailsDiv.style.display = "block";
+  if (scanModeDiv) scanModeDiv.style.display = "none";
+  if (caseDetailsDiv) caseDetailsDiv.style.display = "block";
 });
 
-// --- 手動確定 ---
+// 手動入力へ切替
 startManualBtn.onclick = () => {
-  scanModeDiv.style.display = "none";
-  manualModeDiv.style.display = "block";
+  if (scanModeDiv) scanModeDiv.style.display = "none";
+  if (manualModeDiv) manualModeDiv.style.display = "block";
 };
+// バーコード入力に切替
 startScanBtn.onclick = () => {
-  manualModeDiv.style.display = "none";
-  scanModeDiv.style.display = "block";
+  if (manualModeDiv) manualModeDiv.style.display = "none";
+  if (scanModeDiv)   scanModeDiv.style.display = "block";
 };
+// 手動確定
 manualConfirmBtn.onclick = () => {
-  if(!manualOrderIdInput.value || !manualCustomerInput.value || !manualTitleInput.value){
-    alert("必須項目を入力");
+  if (!manualOrderIdInput.value || !manualCustomerInput.value || !manualTitleInput.value) {
+    alert("必須項目を入力してください");
     return;
   }
   detailOrderId.textContent  = manualOrderIdInput.value.trim();
   detailCustomer.textContent = manualCustomerInput.value.trim();
   detailTitle.textContent    = manualTitleInput.value.trim();
-  manualModeDiv.style.display = "none";
-  caseDetailsDiv.style.display = "block";
+  if (manualModeDiv) manualModeDiv.style.display = "none";
+  if (caseDetailsDiv) caseDetailsDiv.style.display = "block";
 };
 
-// --- 登録 ---
+// 登録（案件＋追跡）
 confirmAddCaseBtn.onclick = async () => {
   const orderId  = detailOrderId.textContent.trim();
   const customer = detailCustomer.textContent.trim();
@@ -749,30 +860,34 @@ confirmAddCaseBtn.onclick = async () => {
     addCaseMsg.textContent = "情報不足";
     return;
   }
-  // 既存データ取得
+
+  // 既存セット
   const snap = await db.ref(`shipments/${orderId}`).once("value");
   const existObj = snap.val() || {};
   const existSet = new Set(Object.values(existObj).map(it => `${it.carrier}:${it.tracking}`));
+
+  // 新規項目集約
   const items = [];
   let missingCarrier = false;
-  // 行ごとの強調を初期化
-  Array.from(trackingRows.children).forEach(row => {
-    row.classList.remove('missing-carrier');
-  });
+
+  // 行の強調リセット
+  Array.from(trackingRows.children).forEach(row => row.classList.remove("missing-carrier"));
+
   Array.from(trackingRows.children).forEach(row => {
     const tn = row.querySelector("input").value.trim();
     const carrier = fixedCarrierCheckbox.checked ? fixedCarrierSelect.value : row.querySelector("select")?.value;
     if (tn && !carrier) {
       missingCarrier = true;
-      // 視覚的に強調
-      row.classList.add('missing-carrier');
+      row.classList.add("missing-carrier");
     }
-    if (!tn || !carrier) return; // 入力不足はスキップ
+    if (!tn || !carrier) return;
+
     const key = `${carrier}:${tn}`;
     if (existSet.has(key)) return;
     existSet.add(key);
     items.push({ carrier, tracking: tn });
   });
+
   if (missingCarrier) {
     addCaseMsg.textContent = "運送会社を選択してください";
     return;
@@ -781,14 +896,16 @@ confirmAddCaseBtn.onclick = async () => {
     alert("新規追跡なし");
     return;
   }
-  // ケース情報を保存
+
+  // ケース情報保存
   await db.ref(`cases/${orderId}`).set({
     注番: orderId,
     得意先: customer,
     品名: title,
     createdAt: Date.now()
   });
-  // 新規追跡を登録
+
+  // 追跡追加保存
   for (const it of items) {
     await db.ref(`shipments/${orderId}`).push({
       carrier: it.carrier,
@@ -796,134 +913,105 @@ confirmAddCaseBtn.onclick = async () => {
       createdAt: Date.now()
     });
   }
-  // 完了メッセージをクリアし、詳細画面へ遷移
+
   addCaseMsg.textContent = "登録完了";
-  // 追加完了後に詳細画面を表示
+
+  // 詳細画面を表示
   await showCaseDetail(orderId, { 得意先: customer, 品名: title });
 };
 
-// --- 別案件追加ボタン ---
-anotherCaseBtn.onclick = () => {
-  showView("add-case-view");
-  initAddCaseView();
-};
-anotherCaseBtn2.onclick = () => {
-  showView("add-case-view");
-  initAddCaseView();
-};
+// 別案件追加
+anotherCaseBtn.onclick  = () => { showView("add-case-view");  initAddCaseView(); };
+anotherCaseBtn2.onclick = () => { showView("add-case-view");  initAddCaseView(); };
 
-// --- 検索結果描画 ---
-function renderSearchResults(list){
+// ================================================================
+//  検索結果描画・検索
+// ================================================================
+function renderSearchResults(list) {
   searchResults.innerHTML = "";
-  // 更新前にチェックボックスイベントをリセット
   list.forEach(item => {
     const li = document.createElement("li");
-    // attach orderId to li
     li.dataset.orderId = item.orderId;
-    if(isAdmin){
-      // 先頭に複数選択用チェックボックス
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "select-case-checkbox";
-      checkbox.dataset.orderId = item.orderId;
-      li.appendChild(checkbox);
+
+    if (isAdmin) {
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "select-case-checkbox";
+      cb.dataset.orderId = item.orderId;
+      li.appendChild(cb);
     }
-    // テキスト表示
+
     const span = document.createElement("span");
     span.textContent = `${item.orderId} / ${item.得意先} / ${item.品名}`;
     li.appendChild(span);
-    // 行クリックで詳細表示。ただしチェックボックスをクリックしたときは除外
-    li.onclick = (e) => {
-      if(e.target instanceof HTMLInputElement) return;
+
+    li.onclick = e => {
+      if (e.target instanceof HTMLInputElement) return; // チェックボックスクリックは除外
       showCaseDetail(item.orderId, item);
     };
+
     searchResults.appendChild(li);
   });
-  // 管理者のみ削除ボタンを表示
-  deleteSelectedBtn.style.display = isAdmin ? "block" : "none";
 
-  // 管理者のみ全選択チェックボックスを表示
-  if (isAdmin) {
-    selectAllContainer.style.display = "block";
-  } else {
-    selectAllContainer.style.display = "none";
-  }
-  // 全選択状態をリセット
+  // 管理者UI
+  deleteSelectedBtn.style.display = isAdmin ? "block" : "none";
+  selectAllContainer.style.display = isAdmin ? "block" : "none";
   if (selectAllCheckbox) selectAllCheckbox.checked = false;
 
-  // 各チェックボックスの状態変更で全選択の状態を更新
+  // 全選択状態更新
   const boxes = searchResults.querySelectorAll(".select-case-checkbox");
-  boxes.forEach(cb => {
-    cb.onchange = updateSelectAllState;
-  });
-  // 初期表示時に全選択状態を更新
+  boxes.forEach(cb => cb.onchange = updateSelectAllState);
   updateSelectAllState();
 }
 
-// --- 検索／全件 ---
-function searchAll(kw=""){
+// 全選択チェックボックスの状態更新
+function updateSelectAllState() {
+  if (!isAdmin) return;
+  const boxes = searchResults.querySelectorAll(".select-case-checkbox");
+  const checked = searchResults.querySelectorAll(".select-case-checkbox:checked");
+  selectAllCheckbox.checked = (boxes.length > 0 && boxes.length === checked.length);
+}
+
+// 検索/一覧
+function searchAll(kw = "") {
   db.ref("cases").once("value").then(snap => {
     const data = snap.val() || {};
     const res = [];
     const startVal = startDateInput.value;
     const endVal   = endDateInput.value;
-    let startTs = null;
-    let endTs   = null;
-    if (startVal) {
-      // 開始日は 00:00:00
-      startTs = new Date(startVal + 'T00:00:00').getTime();
-    }
-    if (endVal) {
-      // 終了日は 23:59:59
-      const d = new Date(endVal + 'T23:59:59');
-      endTs = d.getTime();
-    }
-    Object.entries(data).forEach(([orderId,obj]) => {
-      // キーワード一致判定
-      const matchKw = !kw || orderId.includes(kw) || obj.得意先.includes(kw) || obj.品名.includes(kw);
+    let startTs = null, endTs = null;
+    if (startVal) startTs = new Date(startVal + "T00:00:00").getTime();
+    if (endVal)   endTs   = new Date(endVal   + "T23:59:59").getTime();
+
+    Object.entries(data).forEach(([orderId, obj]) => {
+      const matchKw = !kw || orderId.includes(kw) || (obj.得意先 || "").includes(kw) || (obj.品名 || "").includes(kw);
       if (!matchKw) return;
-      // 期間絞り込み
       if (startTs !== null && obj.createdAt < startTs) return;
-      if (endTs !== null && obj.createdAt > endTs) return;
+      if (endTs   !== null && obj.createdAt > endTs)   return;
       res.push({ orderId, ...obj });
     });
-    // 新→古順にソート
-    res.sort((a,b) => b.createdAt - a.createdAt);
+
+    // 新しい順
+    res.sort((a, b) => b.createdAt - a.createdAt);
     renderSearchResults(res);
   });
 }
 
-// 全選択チェックボックスの状態を更新する関数
-function updateSelectAllState() {
-  if (!isAdmin) return;
-  const boxes = searchResults.querySelectorAll(".select-case-checkbox");
-  const checked = searchResults.querySelectorAll(".select-case-checkbox:checked");
-  // 全てのチェックボックスがオンの場合のみチェック状態にする
-  if (boxes.length > 0 && boxes.length === checked.length) {
-    selectAllCheckbox.checked = true;
-  } else {
-    selectAllCheckbox.checked = false;
-  }
-}
-
 searchBtn.onclick = () => {
-  // キーワードと期間の両方が入力されている場合はリセットして一覧表示
   const kw = searchInput.value.trim();
   const hasKw = kw.length > 0;
   const hasPeriod = startDateInput.value || endDateInput.value;
   showView("search-view");
   if (hasKw && hasPeriod) {
-    // 検索条件をクリアして全件表示
     searchInput.value = "";
     startDateInput.value = "";
-    endDateInput.value = "";
+    endDateInput.value   = "";
     searchAll();
   } else {
     searchAll(kw);
   }
 };
 listAllBtn.onclick = () => {
-  // 検索条件をすべてリセットして全件表示
   searchInput.value = "";
   startDateInput.value = "";
   endDateInput.value = "";
@@ -931,36 +1019,38 @@ listAllBtn.onclick = () => {
   searchAll();
 };
 
-// 選択削除ボタンの処理（管理者のみ）
+// 管理者：選択削除
 deleteSelectedBtn.onclick = async () => {
-  const checkboxes = searchResults.querySelectorAll(".select-case-checkbox:checked");
-  const count = checkboxes.length;
+  const cbs = searchResults.querySelectorAll(".select-case-checkbox:checked");
+  const count = cbs.length;
   if (count === 0) return;
+
   if (count === 1) {
-    const orderId = checkboxes[0].dataset.orderId;
+    const orderId = cbs[0].dataset.orderId;
     if (!confirm(`「${orderId}」を削除しますか？`)) return;
   } else {
-    // 複数選択時は一度だけ確認
-    if (!confirm('選択案件を削除しますか？')) return;
+    if (!confirm("選択案件を削除しますか？")) return;
   }
-  for (const cb of checkboxes) {
+
+  for (const cb of cbs) {
     const orderId = cb.dataset.orderId;
     try {
       await db.ref(`cases/${orderId}`).remove();
       await db.ref(`shipments/${orderId}`).remove();
     } catch (e) {
-      console.error(e);
+      console.error("削除失敗:", e);
     }
-    cb.closest('li').remove();
+    cb.closest("li")?.remove();
   }
-  // 削除後に全選択状態を更新
   updateSelectAllState();
 };
 
-// --- 詳細＋ステータス取得 ---
-async function showCaseDetail(orderId, obj){
+// ================================================================
+//  詳細表示＋ステータス取得
+// ================================================================
+async function showCaseDetail(orderId, obj) {
   showView("case-detail-view");
-  detailInfoDiv.innerHTML = `<div>受注番号: ${orderId}</div><div>得意先:   ${obj.得意先}</div><div>品名: ${obj.品名}</div>`;
+  detailInfoDiv.innerHTML = `<div>受注番号: ${orderId}</div><div>得意先: ${obj.得意先 || ""}</div><div>品名: ${obj.品名 || ""}</div>`;
   detailShipmentsUl.innerHTML = "";
   currentOrderId = orderId;
   addTrackingDetail.style.display = "none";
@@ -969,18 +1059,16 @@ async function showCaseDetail(orderId, obj){
   detailAddRowBtn.disabled = false;
   confirmDetailAddBtn.disabled = false;
   cancelDetailAddBtn.disabled = false;
+
   const snap = await db.ref(`shipments/${orderId}`).once("value");
   const list = snap.val() || {};
   for (const key of Object.keys(list)) {
     const it = list[key];
     const label = carrierLabels[it.carrier] || it.carrier;
     const a = document.createElement("a");
-    // hida は固定 URL のため追跡番号を追加しない
-    if (it.carrier === 'hida') {
-      a.href = carrierUrls[it.carrier];
-    } else {
-      a.href = carrierUrls[it.carrier] + encodeURIComponent(it.tracking);
-    }
+    // 飛騨は固定URL
+    if (it.carrier === "hida") a.href = carrierUrls[it.carrier];
+    else a.href = carrierUrls[it.carrier] + encodeURIComponent(it.tracking);
     a.target = "_blank";
     a.textContent = `${label}：${it.tracking}：読み込み中…`;
     const li = document.createElement("li");
@@ -996,129 +1084,51 @@ async function showCaseDetail(orderId, obj){
     }
   }
 }
-
 backToSearchBtn.onclick = () => showView("search-view");
 
-// ─────────────────────────────────────────────────────────────────
-// ３）２次元コード読み取り (jsQR)
-// ─────────────────────────────────────────────────────────────────
-const canvas = document.createElement('canvas');
-async function start2DScanner(inputId) {
-  const video = document.getElementById('video2d');
-  video.style.display = 'block';
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-  video.srcObject = stream;
-  video.play();
-  scan2D(video, inputId);
+// Cloudflare Worker API 経由でステータス取得
+async function fetchStatus(carrier, tracking) {
+  if (carrier === "hida") return { status: "非対応", time: null };
+  const url = `https://track-api.hr46-ksg.workers.dev/?carrier=${encodeURIComponent(carrier)}&tracking=${encodeURIComponent(tracking)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
-function stop2DScanner() {
-  const video = document.getElementById('video2d');
-  (video.srcObject?.getTracks() || []).forEach(t => t.stop());
-  video.srcObject = null;
-  video.style.display = 'none';
-}
-function scan2D(video, inputId) {
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(img.data, img.width, img.height);
-    if (code) {
-      document.getElementById(inputId).value = code.data;
-      stop2DScanner();
-      return;
-    }
+
+// ステータス用ラベル
+function getTimeLabel(carrier, status, time) {
+  if (!time || time.includes("：")) return "";
+  if (carrier === "seino") {
+    if (status === "配達済みです") return "配達日時:";
+    return "最新日時:";
   }
-  requestAnimationFrame(() => scan2D(video, inputId));
+  if (carrier === "yamato" || carrier === "tonami") {
+    if (status === "配達完了" || status === "お届け完了" || status === "配達済み") return "配達日時:";
+    return "予定日時:";
+  }
+  if (status && status.includes("配達完了")) return "配達日時:";
+  return "予定日時:";
+}
+function formatShipmentText(carrier, tracking, status, time) {
+  const label = carrierLabels[carrier] || carrier;
+  if (carrier === "hida") return `${label}：${tracking}：${status}`;
+  const tl = getTimeLabel(carrier, status, time);
+  if (time) {
+    return tl ? `${label}：${tracking}：${status}　${tl}${time}` : `${label}：${tracking}：${status}　${time}`;
+  }
+  return `${label}：${tracking}：${status}`;
 }
 
-// ─────────────────────────────────────────────────────────────────
-// ４）１次元バーコード読み取り (QuaggaJS)
-// ─────────────────────────────────────────────────────────────────
-function start1DScanner(inputId) {
-  const video = document.getElementById('video1d');
-  video.style.display = 'block';
-  Quagga.init({
-    inputStream: {
-      name: "Live",
-      type: "LiveStream",
-      target: video,
-      constraints: { facingMode: "environment" }
-    },
-    decoder: {
-      readers: [
-        "code_128_reader",
-        "ean_reader",
-        "ean_8_reader",
-        "upc_reader",
-        "upc_e_reader"
-      ]
-    }
-  }, err => {
-    if (err) return console.error(err);
-    Quagga.start();
-  });
-  Quagga.onDetected(result => {
-    const code = result.codeResult?.code;
-    if (code) {
-      document.getElementById(inputId).value = code;
-      Quagga.stop();
-      video.style.display = 'none';
-    }
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────
-// ５）セッションタイムアウト（10分）
-// ─────────────────────────────────────────────────────────────────
-function resetSessionTimer() {
-  // 既存のタイマーをキャンセル
-  clearTimeout(sessionTimer);
-  // 新しいタイマーを設定し、10分間操作がない場合にログアウト処理を実施します
-  sessionTimer = setTimeout(() => {
-    alert('セッションが10分を超えました。再度ログインしてください。');
-    auth.signOut();
-    // メール・パスワード欄をクリア
-    emailInput.value    = "";
-    passwordInput.value = "";
-  }, SESSION_LIMIT_MS);
-  // この関数はユーザー操作時に呼び出されるため、操作があったタイミングで
-  // loginTime を更新しセッションを延長します
-  markLoginTime();
-}
-function startSessionTimer() {
-  // タイマーを初期化
-  resetSessionTimer();
-  // セッションタイマーをリセットする対象イベントを定義します
-  const events = ['click', 'keydown', 'touchstart', 'input', 'change'];
-  events.forEach(evt => {
-    document.addEventListener(evt, resetSessionTimer);
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────
-// 詳細画面：追跡番号追加フォーム操作
-// ─────────────────────────────────────────────────────────────────
-// 「追跡番号追加」ボタン
+// 詳細：追跡番号追加UI
 showAddTrackingBtn.onclick = () => {
   addTrackingDetail.style.display = "block";
   detailTrackingRows.innerHTML = "";
-  // 初回は5行追加
-  for (let i = 0; i < 5; i++) {
-    detailTrackingRows.appendChild(createTrackingRow("detail"));
-  }
-  // ボタンを非表示
+  for (let i = 0; i < 5; i++) detailTrackingRows.appendChild(createTrackingRow("detail"));
   showAddTrackingBtn.style.display = "none";
 };
-// 「＋追跡番号行を5行ずつ追加」
 detailAddRowBtn.onclick = () => {
-  for (let i = 0; i < 5; i++) {
-    detailTrackingRows.appendChild(createTrackingRow("detail"));
-  }
+  for (let i = 0; i < 5; i++) detailTrackingRows.appendChild(createTrackingRow("detail"));
 };
-// 「キャンセル」
 cancelDetailAddBtn.onclick = () => {
   addTrackingDetail.style.display = "none";
   detailTrackingRows.innerHTML = "";
@@ -1126,83 +1136,26 @@ cancelDetailAddBtn.onclick = () => {
   showAddTrackingBtn.style.display = "inline-block";
 };
 
-// fetchStatus ヘルパー
-async function fetchStatus(carrier, tracking) {
-  // hida の API は非対応なので status/time は返さない
-  if (carrier === 'hida') {
-    return { status: '非対応', time: null };
-  }
-  const url = `https://track-api.hr46-ksg.workers.dev/?carrier=${encodeURIComponent(carrier)}&tracking=${encodeURIComponent(tracking)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-// 時間ラベルの生成
-function getTimeLabel(carrier, status, time) {
-  // time が無い場合や既に「：」が含まれている場合はラベルを付与しない
-  if (!time || time.includes('：')) {
-    return '';
-  }        
-  // 西濃運輸は常に「最新日時:」
-  if (carrier === 'seino') {
-    if (status === '配達済みです') {
-      return '配達日時:';
-    }
-    return '最新日時:';
-  }
-  // ヤマト・トナミは配達完了（またはお届け完了）の場合に「配達日時:」
-  if (carrier === 'yamato' || carrier === 'tonami') {
-    if (status === '配達完了' || status === 'お届け完了' || status === '配達済み') {
-      return '配達日時:';
-    }
-    return '予定日時:';
-  }
-  // その他のキャリア：status に「配達完了」が含まれていれば配達日時、それ以外は予定日時
-  if (status && status.includes('配達完了')) {
-    return '配達日時:';
-  }
-  return '予定日時:';
-}
-
-// テキスト組み立て
-function formatShipmentText(carrier, tracking, status, time) {
-  const label = carrierLabels[carrier] || carrier;
-  // hida は非対応
-  if (carrier === 'hida') {
-    return `${label}：${tracking}：${status}`;
-  }
-  const timeLabel = getTimeLabel(carrier, status, time);
-  if (time) {
-    if (timeLabel) {
-      return `${label}：${tracking}：${status}　${timeLabel}${time}`;
-    } else {
-      return `${label}：${tracking}：${status}　${time}`;
-    }
-  }
-  return `${label}：${tracking}：${status}`;
-}
-
-// 「追加登録」
+// 追加登録（詳細）
 confirmDetailAddBtn.onclick = async () => {
   if (!currentOrderId) return;
+
   const snap = await db.ref(`shipments/${currentOrderId}`).once("value");
   const existObj = snap.val() || {};
   const existSet = new Set(Object.values(existObj).map(it => `${it.carrier}:${it.tracking}`));
+
   const newItems = [];
   let missingCarrier = false;
-  // 行ごとの強調を初期化
-  detailTrackingRows.querySelectorAll(".tracking-row").forEach(row => {
-    row.classList.remove('missing-carrier');
-  });
+
+  detailTrackingRows.querySelectorAll(".tracking-row").forEach(row => row.classList.remove("missing-carrier"));
+
   detailTrackingRows.querySelectorAll(".tracking-row").forEach(row => {
     const tn = row.querySelector("input").value.trim();
     if (!tn) return;
     const carrier = fixedCarrierCheckboxDetail.checked ? fixedCarrierSelectDetail.value : row.querySelector("select")?.value;
     if (!carrier) {
       missingCarrier = true;
-      // 視覚的に強調
-      row.classList.add('missing-carrier');
+      row.classList.add("missing-carrier");
       return;
     }
     const key = `${carrier}:${tn}`;
@@ -1210,6 +1163,7 @@ confirmDetailAddBtn.onclick = async () => {
     existSet.add(key);
     newItems.push({ carrier, tracking: tn });
   });
+
   if (missingCarrier) {
     detailAddMsg.textContent = "運送会社を選択してください";
     return;
@@ -1218,19 +1172,22 @@ confirmDetailAddBtn.onclick = async () => {
     alert("新規の追跡番号がありません（既に登録済み）");
     return;
   }
+
   // DB へ登録
   for (const it of newItems) {
-    await db.ref(`shipments/${currentOrderId}`).push({ carrier: it.carrier, tracking: it.tracking, createdAt: Date.now() });
+    await db.ref(`shipments/${currentOrderId}`).push({
+      carrier: it.carrier,
+      tracking: it.tracking,
+      createdAt: Date.now()
+    });
   }
+
   // UI 更新
-  const anchorEls = newItems.map(it => {
+  const anchors = newItems.map(it => {
     const label = carrierLabels[it.carrier] || it.carrier;
     const a = document.createElement("a");
-    if (it.carrier === 'hida') {
-      a.href = carrierUrls[it.carrier];
-    } else {
-      a.href = carrierUrls[it.carrier] + encodeURIComponent(it.tracking);
-    }
+    if (it.carrier === "hida") a.href = carrierUrls[it.carrier];
+    else a.href = carrierUrls[it.carrier] + encodeURIComponent(it.tracking);
     a.target = "_blank";
     a.textContent = `${label}：${it.tracking}：読み込み中…`;
     const li = document.createElement("li");
@@ -1238,17 +1195,18 @@ confirmDetailAddBtn.onclick = async () => {
     detailShipmentsUl.appendChild(li);
     return a;
   });
+
   // フォームを閉じる
-  addTrackingDetail.style.display  = "none";
-  detailTrackingRows.innerHTML     = "";
+  addTrackingDetail.style.display = "none";
+  detailTrackingRows.innerHTML = "";
   showAddTrackingBtn.style.display = "inline-block";
-  detailAddMsg.textContent         = "追加しました";
-  // fetch status and update text
+  detailAddMsg.textContent = "追加しました";
+
+  // ステータス取得
   newItems.forEach((it, idx) => {
-    const a = anchorEls[idx];
+    const a = anchors[idx];
     fetchStatus(it.carrier, it.tracking)
-      .then(json => {
-        const { status, time } = json;
+      .then(({ status, time }) => {
         a.textContent = formatShipmentText(it.carrier, it.tracking, status, time);
       })
       .catch(err => {
