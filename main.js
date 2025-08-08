@@ -372,7 +372,7 @@ if (typeof window.isSessionExpired !== 'function') {
   };
 }
 function clearLoginTime() {
-  localStorage.removeItem('loginTime');
+  try { localStorage.removeItem('loginTime'); } catch (_) {}
 }
 function markLoginTime() {
   localStorage.setItem('loginTime', Date.now().toString());
