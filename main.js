@@ -83,7 +83,7 @@ async function selectBackCamera() {
 }
 
 // スキャン開始
-async async function startScanning(formats, inputId) {
+async function startScanning(formats, inputId) {
   if (!isMobileDevice()) {
     alert('このデバイスではカメラ機能を利用できません');
     return;
