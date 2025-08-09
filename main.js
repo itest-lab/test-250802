@@ -122,39 +122,27 @@ async function decodePdf417Fallback(file) {
   return await decodeFromBlob(file);
 }
 
-// 案件追加画面で PC のファイル選択から PDF417 を読み取る関数
+// 既存の scanCaseFile を丸ごと置き換え
 async function scanCaseFile(file) {
-  // まず BarScanJS を試みる
-  if (await ensureBarScanJsReady()) {
-    try {
-      let results = [];
+  // BarScanJSでPDF/画像をPDF417限定で読む
+  try {
+    if (await ensureBarScanJsReady()) {
       const type = (file && file.type ? file.type : '').toLowerCase();
-      if (type.includes('pdf')) {
-        results = await window.BarScanJS.scanPDF(file, { allow2D: true });
-      } else {
-        results = await window.BarScanJS.scanImage(file, { allow2D: true });
-      }
+      const opts = { pdf417Only: true }; // ← PDF417のみ
+      const results = type.includes('pdf')
+        ? await window.BarScanJS.scanPDF(file, opts)
+        : await window.BarScanJS.scanImage(file, opts);
       if (Array.isArray(results) && results.length > 0) {
-        // BarScanJS の結果には format プロパティが含まれる場合があります。
-        // PDF417 を優先して取得し、無ければ最初の値を使用します。
-        let code = null;
-        for (const r of results) {
-          const fmt = (r.format || '').toUpperCase();
-          if (fmt.includes('PDF')) {
-            code = r.text && String(r.text).trim();
-            break;
-          }
-        }
-        if (!code) {
-          code = results[0].text && String(results[0].text).trim();
-        }
-        if (code) return code;
+        const hit = results.find(r => String(r.format||'').toUpperCase().includes('PDF'));
+        const text = (hit?.text || results[0].text || '').trim();
+        if (text) return text;
       }
-    } catch (e) {
-      console.error('BarScanJS scanCaseFile error', e);
     }
+  } catch (e) {
+    console.error('scanCaseFile(pdf417Only) error', e);
   }
-  // BarScanJS で検出できなかった場合はフォールバックとして BarcodeDetector を使用
+
+  // フォールバック（BarcodeDetectorのPDF417。対応端末は少なめ）
   return await decodePdf417Fallback(file);
 }
 
@@ -765,57 +753,31 @@ async function decodeFromPdf(file){
 }
 
 async function scanFileForCodes(file){
-  // まず BarScanJS での読み取りを試みる
+  // BarScanJS（CODABAR限定）を優先
   try {
     if (await ensureBarScanJsReady()) {
-      let results = [];
       const type = (file.type || '').toLowerCase();
-      if (type.includes('pdf')) {
-        results = await window.BarScanJS.scanPDF(file, { allow2D: true });
-      } else {
-        results = await window.BarScanJS.scanImage(file, { allow2D: true });
-      }
+      const opts = { codabarOnly: true, trimABCD: true };
+      const results = type.includes('pdf')
+        ? await window.BarScanJS.scanPDF(file, opts)
+        : await window.BarScanJS.scanImage(file, opts);
       if (Array.isArray(results) && results.length > 0) {
-        let code = null;
-        // CODABAR を優先して取得
-        for (const r of results) {
-          const fmt = (r.format || '').toUpperCase();
-          if (fmt.includes('CODABAR')) {
-            code = r.text && String(r.text).trim();
-            break;
-          }
+        // ZXingのフォーマット名に CodaBar / CODABAR 等が来る想定
+        const hit = results.find(r => /CODABAR/i.test(String(r.format||''))) || results[0];
+        let v = (hit.text || '').trim();
+        if (v.length >= 2 && /[ABCD]/i.test(v[0]) && /[ABCD]/i.test(v[v.length-1])) {
+          v = v.substring(1, v.length-1);
         }
-        // CODABAR が見つからなければ PDF417 など他形式を検討
-        if (!code) {
-          for (const r of results) {
-            const fmt = (r.format || '').toUpperCase();
-            if (fmt.includes('PDF')) {
-              code = r.text && String(r.text).trim();
-              break;
-            }
-          }
-        }
-        if (!code) {
-          code = results[0].text && String(results[0].text).trim();
-        }
-        if (code) {
-          return normalizeCodabar(String(code));
-        }
+        return v || null;
       }
     }
-  } catch (err) {
-    console.error('BarScanJS scanFileForCodes error', err);
+  } catch (e) {
+    console.error('scanFileForCodes(codabarOnly) error', e);
   }
-  // BarScanJS で読めなければ従来のロジックを利用
-  const type = (file.type || '').toLowerCase();
-  let v = null;
-  if (type.includes('pdf')) {
-    v = await decodeFromPdf(file);
-  } else {
-    v = await decodeFromImage(file);
-  }
-  if (!v) return null;
-  return normalizeCodabar(String(v));
+
+  // BarScanJSが使えない/失敗時の簡易フォールバック（画像→BarcodeDetectorはCODABAR非対応が多い）
+  // → ここは実質的にヒットしない可能性が高いので null を返す
+  return null;
 }
 
 function createTrackingRow(context="add"){
