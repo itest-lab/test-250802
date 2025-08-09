@@ -318,75 +318,67 @@ async function toggleTorch() {
 
 // DOMContentLoaded 時にカメラ関連 UI を初期化
 window.addEventListener('DOMContentLoaded', () => {
-  // オーバーレイのボタンにイベントを紐付け
+  // オーバーレイ制御
   const closeBtn = document.getElementById('close-button');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      stopScanning();
-    });
-  }
+  if (closeBtn) closeBtn.addEventListener('click', stopScanning);
   const torchBtn = document.getElementById('torch-button');
-  if (torchBtn) {
-    torchBtn.addEventListener('click', () => {
-      toggleTorch();
-    });
-  }
-  // 案件追加用カメラボタン
+  if (torchBtn) torchBtn.addEventListener('click', toggleTorch);
+
+  // 案件追加の UI
   const caseCameraBtn = document.getElementById('case-camera-btn');
-  if (caseCameraBtn) {
-    // PC ではカメラを起動しないため非表示にし、スマホでは表示して起動させる
-    if (isMobileDevice()) {
-      caseCameraBtn.style.display = 'block';
-      caseCameraBtn.addEventListener('click', () => {
-        // QR/PDF417 を対象とする
-        startScanning([
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.PDF_417
-        ], 'case-barcode');
-      });
-    } else {
-      caseCameraBtn.style.display = 'none';
-    }
+  const caseFileBtn   = document.getElementById('case-file-btn');
+  const caseFileInput = document.getElementById('case-file-input');
+  const caseBarcodeInput = document.getElementById('case-barcode');
+  const startManualBtn = document.getElementById('start-manual-btn');
+  const startScanBtn   = document.getElementById('start-scan-btn');
+  const scanModeDiv    = document.getElementById('scan-mode');
+  const manualModeDiv  = document.getElementById('manual-mode');
+
+  // 既存：手動⇄スキャン切替（そのまま）
+  if (startManualBtn) startManualBtn.onclick = () => { scanModeDiv.style.display='none'; manualModeDiv.style.display='block'; };
+  if (startScanBtn)   startScanBtn.onclick   = () => { manualModeDiv.style.display='none'; scanModeDiv.style.display='block'; };
+
+  // ★ 要求仕様：PC=ファイルのみ、スマホ=カメラ＋ファイル（横並び）
+  if (isMobileDevice()) {
+    if (caseCameraBtn) { caseCameraBtn.style.display = 'inline-block'; caseCameraBtn.onclick = () => {
+      // QR + PDF417 をスマホカメラで読み取り
+      startScanning([ Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.PDF_417 ], 'case-barcode');
+    }; }
+    if (caseFileBtn)   { caseFileBtn.style.display   = 'inline-block'; caseFileBtn.onclick   = () => caseFileInput?.click(); }
+    if (caseFileInput) { caseFileInput.setAttribute('capture','environment'); }
+  } else {
+    if (caseCameraBtn) caseCameraBtn.style.display = 'none';
+    if (caseFileBtn)   { caseFileBtn.style.display   = 'inline-block'; caseFileBtn.onclick   = () => caseFileInput?.click(); }
   }
 
-  // PC 用ファイル選択ボタンの初期化
-  const caseFileBtn = document.getElementById('case-file-btn');
-  const caseFileInput = document.getElementById('case-file-input');
-  if (caseFileBtn && caseFileInput) {
-    if (isMobileDevice()) {
-      // スマホではファイル選択は使用しない
-      caseFileBtn.style.display = 'none';
-      caseFileInput.style.display = 'none';
-    } else {
-      // PC ではファイル選択ボタンを表示
-      caseFileBtn.style.display = 'block';
-      // ファイルボタンを押すと隠れた input をクリック
-      caseFileBtn.addEventListener('click', () => {
-        caseFileInput.click();
-      });
-      // ファイル選択時に PDF417 を読み取り case-barcode へセット
-      caseFileInput.addEventListener('change', async (ev) => {
-        const f = ev.target.files && ev.target.files[0];
-        if (!f) return;
-        try {
-          const val = await scanCaseFile(f);
-          if (!val) {
-            alert('PDF/画像から PDF417 バーコードを検出できませんでした');
-            return;
-          }
-          // 入力欄に値を設定し、Enter イベントを発火させて次へ進む
-          caseBarcodeInput.value = val;
-          caseBarcodeInput.dispatchEvent(new Event('input', { bubbles: true }));
-          // Enter キー押下を模倣して詳細表示を進める
-          caseBarcodeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        } catch (err) {
-          alert('ファイルからの読み取りに失敗: ' + ((err && err.message) || err));
-        } finally {
-          // 同じファイルを再選択できるよう空にする
-          ev.target.value = '';
+  // ★ ファイル選択 → PDF417 限定で読み込み（barscan.js を使用）
+  if (caseFileInput) {
+    caseFileInput.addEventListener('change', async (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      if (!f) return;
+      try {
+        const ok = await ensureBarScanReady();
+        if (!ok) throw new Error('BarScanJS が初期化できません');
+        const type = (f.type || '').toLowerCase();
+        const opts = { pdf417Only: true };
+        const results = type.includes('pdf')
+          ? await window.BarScanJS.scanPDF(f, opts)
+          : await window.BarScanJS.scanImage(f, opts);
+        let val = null;
+        if (Array.isArray(results) && results.length) {
+          const hit = results.find(r => /PDF/.test(String(r.format||''))) || results[0];
+          val = (hit.text || '').trim();
         }
-      });
-    }
+        if (!val) { alert('PDF/画像からPDF417を検出できませんでした'); return; }
+        caseBarcodeInput.value = val;
+        caseBarcodeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        caseBarcodeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      } catch (err) {
+        alert('ファイルからの読み取りに失敗: ' + (err?.message || err));
+      } finally {
+        ev.target.value = '';
+      }
+    });
   }
 });
 
