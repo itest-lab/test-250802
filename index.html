@@ -75,7 +75,8 @@
         <!-- カメラ起動後に写真撮影用ファイル選択ボタンを表示 -->
         <button id="case-file-btn" type="button" style="display:none;">ファイルを選択</button>
         <!-- PC 用ファイル選択ボタン。JS で制御するため初期状態では非表示 -->
-        <input type="file" id="case-file-input" accept="image/*" style="display:none;" />
+        <!-- PC用ファイル選択。PDF417 を含むバーコードを取得するため PDF にも対応 -->
+        <input type="file" id="case-file-input" accept="image/*,application/pdf" style="display:none;" />
         <button id="start-manual-btn">手動入力へ切替</button>
       </div>
 
@@ -193,6 +194,8 @@
     </div>
   </div>
 
+  <!-- バーコード認識用ライブラリ BarScanJS を読み込み -->
+  <script src="barscan.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

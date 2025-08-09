@@ -57,6 +57,107 @@ function isMobileDevice() {
   return /android|iPad|iPhone|iPod/i.test(ua);
 }
 
+// --- BarScanJS 初期化と PDF417 ファイル読み取り ---
+// BarScanJS は test リポジトリから導入したバーコード読み取りライブラリです。
+// このアプリでは PC でファイルから PDF417 や CODABAR を読み取る用途に使用します。
+// 初期化は一度だけ行い、以後はキャッシュします。
+let barScanJsReady = false;
+async function ensureBarScanJsReady() {
+  // BarScanJS が読み込まれていなければ利用不可
+  if (typeof window === 'undefined' || !window.BarScanJS) return false;
+  if (!barScanJsReady) {
+    try {
+      // 初期化時にライブラリ群を読み込む（pdf.js、ZXing など）
+      await window.BarScanJS.init({});
+      barScanJsReady = true;
+    } catch (e) {
+      console.error('BarScanJS init error', e);
+      barScanJsReady = false;
+    }
+  }
+  return barScanJsReady;
+}
+
+// PDF417 専用のフォールバック読み取り
+// BarcodeDetector API を用いて PDF417 のみを検出します。
+async function decodePdf417Fallback(file) {
+  const type = (file && file.type ? file.type : '').toLowerCase();
+  // 内部関数: Blob から Bitmap を生成して PDF417 を検出
+  const decodeFromBlob = async (blob) => {
+    try {
+      const bmp = await createImageBitmap(blob);
+      if ('BarcodeDetector' in window) {
+        const detector = new BarcodeDetector({ formats: ['pdf417'] });
+        const results = await detector.detect(bmp);
+        if (results && results.length > 0) {
+          return results[0].rawValue || '';
+        }
+      }
+    } catch (_) {}
+    return null;
+  };
+  // PDF ファイルの場合は各ページを Canvas に描画して検出
+  if (type.includes('pdf')) {
+    try {
+      await ensurePdfJsLoaded();
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const blob = await new Promise(res => canvas.toBlob(res));
+        if (!blob) continue;
+        const val = await decodeFromBlob(blob);
+        if (val) return val;
+      }
+    } catch (_) {}
+    return null;
+  }
+  // 画像ファイルの場合
+  return await decodeFromBlob(file);
+}
+
+// 案件追加画面で PC のファイル選択から PDF417 を読み取る関数
+async function scanCaseFile(file) {
+  // まず BarScanJS を試みる
+  if (await ensureBarScanJsReady()) {
+    try {
+      let results = [];
+      const type = (file && file.type ? file.type : '').toLowerCase();
+      if (type.includes('pdf')) {
+        results = await window.BarScanJS.scanPDF(file, { allow2D: true });
+      } else {
+        results = await window.BarScanJS.scanImage(file, { allow2D: true });
+      }
+      if (Array.isArray(results) && results.length > 0) {
+        // BarScanJS の結果には format プロパティが含まれる場合があります。
+        // PDF417 を優先して取得し、無ければ最初の値を使用します。
+        let code = null;
+        for (const r of results) {
+          const fmt = (r.format || '').toUpperCase();
+          if (fmt.includes('PDF')) {
+            code = r.text && String(r.text).trim();
+            break;
+          }
+        }
+        if (!code) {
+          code = results[0].text && String(results[0].text).trim();
+        }
+        if (code) return code;
+      }
+    } catch (e) {
+      console.error('BarScanJS scanCaseFile error', e);
+    }
+  }
+  // BarScanJS で検出できなかった場合はフォールバックとして BarcodeDetector を使用
+  return await decodePdf417Fallback(file);
+}
+
 // html5-qrcode 用の一時変数
 let html5QrCode = null;
 let scanningInputId = null;
@@ -245,6 +346,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // 案件追加用カメラボタン
   const caseCameraBtn = document.getElementById('case-camera-btn');
   if (caseCameraBtn) {
+    // PC ではカメラを起動しないため非表示にし、スマホでは表示して起動させる
     if (isMobileDevice()) {
       caseCameraBtn.style.display = 'block';
       caseCameraBtn.addEventListener('click', () => {
@@ -255,8 +357,47 @@ window.addEventListener('DOMContentLoaded', () => {
         ], 'case-barcode');
       });
     } else {
-      // PC では非表示
       caseCameraBtn.style.display = 'none';
+    }
+  }
+
+  // PC 用ファイル選択ボタンの初期化
+  const caseFileBtn = document.getElementById('case-file-btn');
+  const caseFileInput = document.getElementById('case-file-input');
+  if (caseFileBtn && caseFileInput) {
+    if (isMobileDevice()) {
+      // スマホではファイル選択は使用しない
+      caseFileBtn.style.display = 'none';
+      caseFileInput.style.display = 'none';
+    } else {
+      // PC ではファイル選択ボタンを表示
+      caseFileBtn.style.display = 'block';
+      // ファイルボタンを押すと隠れた input をクリック
+      caseFileBtn.addEventListener('click', () => {
+        caseFileInput.click();
+      });
+      // ファイル選択時に PDF417 を読み取り case-barcode へセット
+      caseFileInput.addEventListener('change', async (ev) => {
+        const f = ev.target.files && ev.target.files[0];
+        if (!f) return;
+        try {
+          const val = await scanCaseFile(f);
+          if (!val) {
+            alert('PDF/画像から PDF417 バーコードを検出できませんでした');
+            return;
+          }
+          // 入力欄に値を設定し、Enter イベントを発火させて次へ進む
+          caseBarcodeInput.value = val;
+          caseBarcodeInput.dispatchEvent(new Event('input', { bubbles: true }));
+          // Enter キー押下を模倣して詳細表示を進める
+          caseBarcodeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        } catch (err) {
+          alert('ファイルからの読み取りに失敗: ' + ((err && err.message) || err));
+        } finally {
+          // 同じファイルを再選択できるよう空にする
+          ev.target.value = '';
+        }
+      });
     }
   }
 });
@@ -624,6 +765,48 @@ async function decodeFromPdf(file){
 }
 
 async function scanFileForCodes(file){
+  // まず BarScanJS での読み取りを試みる
+  try {
+    if (await ensureBarScanJsReady()) {
+      let results = [];
+      const type = (file.type || '').toLowerCase();
+      if (type.includes('pdf')) {
+        results = await window.BarScanJS.scanPDF(file, { allow2D: true });
+      } else {
+        results = await window.BarScanJS.scanImage(file, { allow2D: true });
+      }
+      if (Array.isArray(results) && results.length > 0) {
+        let code = null;
+        // CODABAR を優先して取得
+        for (const r of results) {
+          const fmt = (r.format || '').toUpperCase();
+          if (fmt.includes('CODABAR')) {
+            code = r.text && String(r.text).trim();
+            break;
+          }
+        }
+        // CODABAR が見つからなければ PDF417 など他形式を検討
+        if (!code) {
+          for (const r of results) {
+            const fmt = (r.format || '').toUpperCase();
+            if (fmt.includes('PDF')) {
+              code = r.text && String(r.text).trim();
+              break;
+            }
+          }
+        }
+        if (!code) {
+          code = results[0].text && String(results[0].text).trim();
+        }
+        if (code) {
+          return normalizeCodabar(String(code));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('BarScanJS scanFileForCodes error', err);
+  }
+  // BarScanJS で読めなければ従来のロジックを利用
   const type = (file.type || '').toLowerCase();
   let v = null;
   if (type.includes('pdf')) {
