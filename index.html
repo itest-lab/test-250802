@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -61,21 +62,11 @@
     <div id="add-case-view" class="subview" style="display:none">
       <h3>案件追加</h3>
 
-      <!-- 隠しファイル入力（カメラ機能コメント化中） -->
-      <!-- <input type="file" id="fileInput2D" accept="image/*" capture="environment" style="display:none;"> -->
-      <!-- <input type="file" id="fileInput1D" accept="image/*" capture="environment" style="display:none;"> -->
-
-        <!-- スキャンモード -->
-        <div id="scan-mode" style="display:none;">
+      <!-- スキャンモード -->
+      <div id="scan-mode" style="display:none;">
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
-        <!-- 案件追加用カメラ起動ボタン -->
-        <!-- スマートフォンかつカメラ使用可能なデバイスの場合のみ表示し、
-        PCやカメラ非対応端末では代わりにファイル選択ボタンを表示します。 -->
+        <!-- 案件追加用カメラ起動ボタン（スマホのみ表示） -->
         <button id="case-camera-btn" type="button">カメラ起動</button>
-        <!-- カメラ起動後に写真撮影用ファイル選択ボタンを表示 -->
-        <button id="case-file-btn" type="button" style="display:none;">ファイルを選択</button>
-        <!-- PC 用ファイル選択ボタン。JS で制御するため初期状態では非表示 -->
-        <input type="file" id="case-file-input" accept="image/*" style="display:none;" />
         <button id="start-manual-btn">手動入力へ切替</button>
       </div>
 
@@ -84,6 +75,8 @@
         <input id="manual-order-id"     placeholder="受注番号" required>
         <input id="manual-customer"     placeholder="得意先"   required>
         <input id="manual-title"        placeholder="品名"     required>
+        <!-- ★ 追加: 下版日（日付入力） -->
+        <label>下版日:<input id="manual-plate-date" type="date" placeholder="下版日"></label>
         <button id="manual-confirm-btn">入力確定</button>
         <button id="start-scan-btn">バーコード入力に切替</button>
       </div>
@@ -93,6 +86,8 @@
         <div>受注番号: <span id="detail-order-id"></span></div>
         <div>得意先:   <span id="detail-customer"></span></div>
         <div>品名:     <span id="detail-title"></span></div>
+        <!-- ★ 追加: 下版日の表示 -->
+        <div>下版日:   <span id="detail-plate-date"></span></div>
 
         <h4>追跡番号リスト設定</h4>
         <div id="fixed-carrier-container">
@@ -112,8 +107,6 @@
         </div>
 
         <div id="tracking-rows"></div>
-        <!-- カメラ起動ボタン（無効化中） -->
-        <!-- <button id="btnScan1D" class="small-btn">カメラ起動</button> -->
         <button id="add-tracking-row-btn">＋追跡番号行を追加</button>
 
         <button id="confirm-add-case-btn">登録</button>
@@ -126,6 +119,13 @@
     <div id="search-view" class="subview" style="display:none;">
       <h3>案件検索</h3>
       <input id="search-input" placeholder="キーワード（注番／得意先／タイトル）">
+      <!-- ★ 追加: どの日時で絞るか選択（既定: 下版日） -->
+      <label>日付基準:
+        <select id="search-date-type">
+          <option value="plate" selected>下版日</option>
+          <option value="created">登録日</option>
+        </select>
+      </label>
       <!-- 期間指定: 開始日と終了日 -->
       <label>開始日:<input type="date" id="start-date"></label>
       <label>終了日:<input type="date" id="end-date"></label>
@@ -184,7 +184,6 @@
   </div>
 
   <!-- カメラプレビューオーバーレイ -->
-  <!-- バーコード／QRコード読取時に画面上に表示されます -->
   <div id="scanner-overlay" style="display:none;">
     <div id="scanner-container">
       <button id="torch-button" class="overlay-btn" title="ライト">💡</button>

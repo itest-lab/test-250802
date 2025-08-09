@@ -1,109 +1,110 @@
+
 body {
-      font-family: sans-serif;
-      max-width: 600px;
-      margin: 2em auto;
-      padding: 0 1em;
-    }
-    h2, h3, h4 {
-      margin-bottom: 0.5em;
-    }
-    input, select, button {
-      display: block;
-      width: 100%;
-      margin: 0.5em 0;
-      padding: 0.5em;
-      box-sizing: border-box;
-    }
-    nav button {
-      display: inline-block;
-      width: auto;
-      margin-right: 1em;
-    }
-    .subview {
-      margin-top: 1em;
-    }
-    .error {
-      color: red;
-    }
-    #fixed-carrier-container {
-      display: flex;
-      align-items: center;
-      gap: 0.5em;
-      margin-bottom: 0.5em;
-    }
-    .tracking-row {
-      display: flex;
-      gap: 0.5em;
-      margin-bottom: 0.5em;
-    }
-    .tracking-row select,
-    .tracking-row input {
-      flex: 1;
-      padding: 0.5em;
-    }
-    #search-results,
-    #detail-shipments {
-      list-style: none;
-      padding: 0;
-    }
-    #search-results li,
-    #detail-shipments li {
-      padding: 0.75em 1em;
-      border-bottom: 1px solid #ddd;
-      cursor: pointer;
-    }
-    #search-results li:hover,
-    #detail-shipments li:hover {
-      background: #f5f5f5;
-    }
-    .delete-case-btn {
-      margin-left: 0.5em;
-      padding: 0.2em 0.5em;
-      font-size: 0.8em;
-      color: #fff;
-      background: #c00;
-      border: none;
-      border-radius: 3px;
-    }
-    #add-tracking-row-btn,
-    #detail-add-tracking-row-btn {
-      width: auto;
-      display: inline-block;
-      margin-top: 0.5em;
-    }
-    .tracking-row a,
-    #detail-shipments a {
-      color: #0066cc;
-      text-decoration: underline;
-      cursor: pointer;
-    }
+  font-family: sans-serif;
+  max-width: 600px;
+  margin: 2em auto;
+  padding: 0 1em;
+}
+h2, h3, h4 {
+  margin-bottom: 0.5em;
+}
+input, select, button {
+  display: block;
+  width: 100%;
+  margin: 0.5em 0;
+  padding: 0.5em;
+  box-sizing: border-box;
+}
+nav button {
+  display: inline-block;
+  width: auto;
+  margin-right: 1em;
+}
+.subview {
+  margin-top: 1em;
+}
+.error {
+  color: red;
+}
+#fixed-carrier-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0.5em;
+}
+.tracking-row {
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 0.5em;
+}
+.tracking-row select,
+.tracking-row input {
+  flex: 1;
+  padding: 0.5em;
+}
+#search-results,
+#detail-shipments {
+  list-style: none;
+  padding: 0;
+}
+#search-results li,
+#detail-shipments li {
+  padding: 0.75em 1em;
+  border-bottom: 1px solid #ddd;
+  cursor: pointer;
+}
+#search-results li:hover,
+#detail-shipments li:hover {
+  background: #f5f5f5;
+}
+.delete-case-btn {
+  margin-left: 0.5em;
+  padding: 0.2em 0.5em;
+  font-size: 0.8em;
+  color: #fff;
+  background: #c00;
+  border: none;
+  border-radius: 3px;
+}
+#add-tracking-row-btn,
+#detail-add-tracking-row-btn {
+  width: auto;
+  display: inline-block;
+  margin-top: 0.5em;
+}
+.tracking-row a,
+#detail-shipments a {
+  color: #0066cc;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
-    /* ローディングオーバーレイ */
-    .loading-overlay {
-      position: fixed;
-      top:0; left:0;
-      width:100%; height:100%;
-      background: rgba(0,0,0,0.5);
-      display: flex; align-items:center; justify-content:center;
-      z-index: 10000;
-    }
-    .loading-overlay.hidden { display: none; }
-    .spinner {
-      width:50px; height:50px;
-      border:5px solid #ccc;
-      border-top-color: #333;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    /* 小さいサイズのボタンスタイル */
-    /*.small-btn {
-      padding: 4px 8px;
-      font-size: 0.8em;
-      line-height: 1.2;
-      border-radius: 4px;
-    }*/
+/* ローディングオーバーレイ */
+.loading-overlay {
+  position: fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items:center; justify-content:center;
+  z-index: 10000;
+}
+.loading-overlay.hidden { display: none; }
+.spinner {
+  width:50px; height:50px;
+  border:5px solid #ccc;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+/* 小さいサイズのボタンスタイル */
+/*.small-btn {
+  padding: 4px 8px;
+  font-size: 0.8em;
+  line-height: 1.2;
+  border-radius: 4px;
+}*/
 
-    @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* 追跡番号のみ入力され運送会社が未選択のときに強調表示する */
 .tracking-row.missing-carrier {
@@ -205,3 +206,12 @@ body {
   flex: 1;
   padding: 0.5em;
 }
+
+/* 配送ステータス可視化 */
+#detail-shipments li { border-left: 4px solid transparent; }
+#detail-shipments li.ship-delivered  { border-left-color:#2e7d32; background:#e8f5e9; }
+#detail-shipments li.ship-intransit  { border-left-color:#1565c0; background:#e3f2fd; }
+#detail-shipments li.ship-info       { border-left-color:#6d4c41; background:#efebe9; }
+#detail-shipments li.ship-exception  { border-left-color:#c62828; background:#ffebee; }
+#detail-shipments li.ship-unknown    { border-left-color:#757575; background:#f5f5f5; }
+#detail-shipments li a { font-weight:600; color: inherit; text-decoration:none; }
