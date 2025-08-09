@@ -13,11 +13,11 @@
   <!-- ZLIB 展開用 pako -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
   <!-- カメラ読み取りライブラリ -->
-  <!-- html5-qrcode はバーコード/QRコード読取に使用します -->
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-  <!-- 旧カメラ用ライブラリはコメントアウトのまま残しておきます -->
-  <!-- <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script> -->
-  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script> -->
+  <style>
+    /* 追加: 案件追加のボタン横並びを安定させる（他影響なし） */
+    #scan-mode .actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+  </style>
 </head>
 <body>
   <!-- 読み込み中オーバーレイ -->
@@ -61,35 +61,29 @@
     <div id="add-case-view" class="subview" style="display:none">
       <h3>案件追加</h3>
 
-      <!-- 隠しファイル入力（カメラ機能コメント化中） -->
-      <!-- <input type="file" id="fileInput2D" accept="image/*" capture="environment" style="display:none;"> -->
-      <!-- <input type="file" id="fileInput1D" accept="image/*" capture="environment" style="display:none;"> -->
-
-        <!-- スキャンモード -->
-        <div id="scan-mode" style="display:none;">
+      <!-- スキャンモード -->
+      <div id="scan-mode" style="display:none;">
         <input id="case-barcode" placeholder="バーコードをスキャン" autocomplete="off" style="ime-mode: disabled;">
-        <!-- 案件追加用カメラ起動ボタン -->
-        <!-- スマートフォンかつカメラ使用可能なデバイスの場合のみ表示し、
-        PCやカメラ非対応端末では代わりにファイル選択ボタンを表示します。 -->
-        <button id="case-camera-btn" type="button">カメラ起動</button>
-        <!-- カメラ起動後に写真撮影用ファイル選択ボタンを表示 -->
-        <button id="case-file-btn" type="button" style="display:none;">ファイルを選択</button>
-        <!-- PC 用ファイル選択ボタン。JS で制御するため初期状態では非表示 -->
-        <!-- PC用ファイル選択。PDF417 を含むバーコードを取得するため PDF にも対応 -->
-        <input type="file" id="case-file-input" accept="image/*,application/pdf" style="display:none;" />
-        <button id="start-manual-btn">手動入力へ切替</button>
+        <div class="actions">
+          <!-- スマホ時: カメラ＋ファイル / PC時: ファイルのみ -->
+          <button id="case-camera-btn" type="button" style="display:none;">カメラ起動</button>
+          <button id="case-file-btn"   type="button" style="display:none;">ファイルを選択</button>
+          <!-- 実ファイル入力（非表示） -->
+          <input type="file" id="case-file-input" accept="image/*,application/pdf" style="display:none;" />
+          <button id="start-manual-btn">手動入力へ切替</button>
+        </div>
       </div>
 
       <!-- 手動モード -->
       <div id="manual-mode" style="display:none;">
-        <input id="manual-order-id"     placeholder="受注番号" required>
-        <input id="manual-customer"     placeholder="得意先"   required>
-        <input id="manual-title"        placeholder="品名"     required>
+        <input id="manual-order-id" placeholder="受注番号" required>
+        <input id="manual-customer" placeholder="得意先" required>
+        <input id="manual-title" placeholder="品名" required>
         <button id="manual-confirm-btn">入力確定</button>
         <button id="start-scan-btn">バーコード入力に切替</button>
       </div>
 
-      <!-- 詳細表示（初期は非表示） -->
+      <!-- 詳細表示 -->
       <div id="case-details" style="display:none;">
         <div>受注番号: <span id="detail-order-id"></span></div>
         <div>得意先:   <span id="detail-customer"></span></div>
@@ -97,10 +91,7 @@
 
         <h4>追跡番号リスト設定</h4>
         <div id="fixed-carrier-container">
-          <label>
-            <input type="checkbox" id="fixed-carrier-checkbox">
-            運送会社を固定
-          </label>
+          <label><input type="checkbox" id="fixed-carrier-checkbox">運送会社を固定</label>
           <select id="fixed-carrier-select" style="display:none;">
             <option value="">運送会社選択してください</option>
             <option value="yamato">ヤマト運輸</option>
@@ -113,54 +104,40 @@
         </div>
 
         <div id="tracking-rows"></div>
-        <!-- カメラ起動ボタン（無効化中） -->
-        <!-- <button id="btnScan1D" class="small-btn">カメラ起動</button> -->
         <button id="add-tracking-row-btn">＋追跡番号行を追加</button>
-
         <button id="confirm-add-case-btn">登録</button>
         <p id="add-case-msg"></p>
         <button id="another-case-btn">別の案件を追加</button>
       </div>
     </div>
 
-    <!-- 案件検索ビュー -->
+    <!-- 案件検索ビュー（既存のまま） -->
     <div id="search-view" class="subview" style="display:none;">
       <h3>案件検索</h3>
       <input id="search-input" placeholder="キーワード（注番／得意先／タイトル）">
-      <!-- 期間指定: 開始日と終了日 -->
       <label>開始日:<input type="date" id="start-date"></label>
       <label>終了日:<input type="date" id="end-date"></label>
       <button id="search-btn">検索</button>
       <button id="list-all-btn">一覧表示</button>
       <ul id="search-results"></ul>
-      <!-- 管理者専用: 全選択チェックボックスと選択削除ボタン -->
       <label id="select-all-container" style="display:none;">
-        <input type="checkbox" id="select-all-checkbox">
-        表示項目を全選択
+        <input type="checkbox" id="select-all-checkbox">表示項目を全選択
       </label>
       <button id="delete-selected-btn" style="display:none;">選択削除</button>
     </div>
 
-    <!-- 案件詳細ビュー -->
+    <!-- 案件詳細ビュー（既存のまま） -->
     <div id="case-detail-view" class="subview" style="display:none;">
       <h3>案件詳細</h3>
       <div id="detail-info"></div>
-
       <h4>追跡情報</h4>
       <ul id="detail-shipments"></ul>
-
       <div id="detail-add-msg"></div>
-
       <button id="show-add-tracking-btn">追跡番号追加</button>
       <div id="add-tracking-detail" style="display:none; margin-top:1em;">
         <h4>追跡番号追加</h4>
-
-        <!-- 運送会社一括指定（詳細画面用） -->
         <div id="fixed-carrier-container-detail">
-          <label>
-            <input type="checkbox" id="fixed-carrier-checkbox-detail">
-            運送会社を固定
-          </label>
+          <label><input type="checkbox" id="fixed-carrier-checkbox-detail">運送会社を固定</label>
           <select id="fixed-carrier-select-detail" style="display:none;">
             <option value="">運送会社選択してください</option>
             <option value="yamato">ヤマト運輸</option>
@@ -171,21 +148,18 @@
             <option value="sagawa">佐川急便</option>
           </select>
         </div>
-
         <div id="detail-tracking-rows"></div>
         <button id="detail-add-tracking-row-btn">＋追跡番号行を追加</button>
         <button id="confirm-detail-add-btn">追加登録</button>
         <p id="detail-add-msg"></p>
         <button id="cancel-detail-add-btn">キャンセル</button>
       </div>
-
       <button id="back-to-search-btn">検索に戻る</button>
       <button id="another-case-btn-2">別の案件を追加</button>
     </div>
   </div>
 
-  <!-- カメラプレビューオーバーレイ -->
-  <!-- バーコード／QRコード読取時に画面上に表示されます -->
+  <!-- カメラプレビューオーバーレイ（既存） -->
   <div id="scanner-overlay" style="display:none;">
     <div id="scanner-container">
       <button id="torch-button" class="overlay-btn" title="ライト">💡</button>
