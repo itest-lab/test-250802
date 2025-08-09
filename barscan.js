@@ -1,4 +1,4 @@
-function (root, factory) {
+(function (root, factory) {
   if (typeof define === 'function' && define.amd) { define([], factory); }
   else if (typeof module === 'object' && module.exports) { module.exports = factory(); }
   else { root.BarScanJS = factory(); }
@@ -10,7 +10,7 @@ function (root, factory) {
     minLen: 10,
     maxLen: null,
     aggressive: false,
-    allow2D: false, // if true, ZXing will also try QR/PDF417
+    allow2D: false,
     cdn: {
       pdfjs: [
         "https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js",
