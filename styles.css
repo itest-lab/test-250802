@@ -1,9 +1,9 @@
-body{
-      font-family:
-      system-ui, sans-serif; 
-      margin:0;
-      padding:1rem;
-      }
+body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 2em auto;
+      padding: 0 1em;
+    }
     h2, h3, h4 {
       margin-bottom: 0.5em;
     }
@@ -104,10 +104,6 @@ body{
     }*/
 
     @keyframes spin { to { transform: rotate(360deg); } }
-
-nav{display:flex; gap:.5rem; margin:.5rem 0;}
-.overlay-btn{margin:.25rem;}
-.loading-overlay.hidden{display:none;}
 
 /* 追跡番号のみ入力され運送会社が未選択のときに強調表示する */
 .tracking-row.missing-carrier {
